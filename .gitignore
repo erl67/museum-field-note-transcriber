@@ -179,3 +179,31 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Local field-note workspace
+.venv/
+.env.*
+!.env.example
+local/
+node_modules/
+# Actual collections, stores, mappings, reviews and profiles belong under local/.
+scans/
+credentials*.json
+token*.json
+*service-account*.json
+private/
+exports/
+reviews/
+profiles/
+blobs/
+journal.jsonl
+store.lock
+*quota*.json
+*quota*.json.lock
+drive-mapping*.json
+Field_notes_viewer.json
+Field_notes_transcriptions.txt
+note_*.txt
+collector_*.txt
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]

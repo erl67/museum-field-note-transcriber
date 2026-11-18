@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #283b3a; background: #f5f3ed; }
+    * { box-sizing: border-box; }
+    body { max-width: 1520px; margin: auto; padding: 32px 40px 56px; }
+    [hidden] { display: none !important; }
+    h1, h2 { font-family: Georgia, serif; font-weight: normal; }
+    h1 { font-size: 2rem; margin: 0 0 8px; }
+    h2 { font-size: clamp(1.6rem, 3vw, 2.5rem); margin: 12px 0; overflow-wrap: anywhere; }
+    h3 { font-size: 1.15rem; }
+    a { color: #225e58; text-underline-offset: 3px; }
+    button, input { font: inherit; }
+    button, .button { padding: 10px 16px; border: 1px solid #c5cec7; border-radius: 6px; background: #fffdf8;
+      color: #225e58; text-decoration: none; display: inline-block; cursor: pointer; }
+    button:hover, .button:hover { background: #e8eee7; }
+    :focus-visible { outline: 3px solid #367a73; outline-offset: 4px; }
+    .button.disabled { color: #747d78; background: transparent; cursor: default; }
+    .site-header { padding-bottom: 24px; border-bottom: 1px solid #d8dcd2; margin-bottom: 28px; }
+    .site-header a { color: inherit; text-decoration: none; }
+    .site-footer { margin-top: clamp(96px, 14vw, 180px); padding-top: 24px;
+      border-top: 1px solid #d8dcd2; color: #5d6b65; font-size: .8125rem; line-height: 1.7; }
+    .site-footer p { max-width: 760px; margin: 0; }
+    .site-footer .footer-links { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-bottom: 14px; }
+    .site-footer a { color: inherit; overflow-wrap: anywhere; }
+    .site-footer a:hover { color: #225e58; }
+    .muted, .field-note { color: #5d6b65; }
+    .eyebrow, .column-label { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
+    .eyebrow { color: #61726a; margin: 0; }
+    .intro { max-width: 760px; line-height: 1.6; }
+    #search { margin: 22px 0 28px; }
+    #search label { display: block; margin-bottom: 8px; font-size: .9rem; }
+    .search-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    input { min-width: 0; width: min(100%, 540px); padding: 12px; border: 1px solid #bcc7bd; border-radius: 6px; background: #fffdf8; }
+    #message:empty, #initial-error:empty { display: none; }
+    #message { color: #5d6b65; }
+    .folder { margin: 14px 0; border: 1px solid #d8ddd3; border-radius: 8px; background: #fffdf8; }
+    .folder > summary { cursor: pointer; padding: 20px 24px; font-size: 1.12rem; overflow-wrap: anywhere; }
+    .folder > summary::marker { color: #37675b; }
+    .folder-divider { border: 0; border-top: 1px solid #d8ddd3; margin: 22px 12px; }
+    .folder-count { font-size: .85rem; color: #61726a; margin-left: 14px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { padding: 15px 24px; border-top: 1px solid #e4e7df; vertical-align: top; overflow-wrap: anywhere; }
+    th { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: #61726a; background: #f5f6f0; }
+    td { font-size: .94rem; line-height: 1.5; }
+    tbody tr:hover { background: #f5f7f1; }
+    .catalogue-summary-row td { border-top: 0; padding: 0 24px 20px; }
+    .catalogue-summary { margin: 0; padding: 12px 16px; background: #f5f6f0;
+      box-shadow: inset 3px 0 #d9e1d3; color: #5d6b65; font-size: .9rem; line-height: 1.65;
+      white-space: normal; overflow-wrap: anywhere; }
+    .field-note { display: block; font-size: .78rem; margin-top: 4px; }
+    .letter-nav { display: flex; gap: 12px; justify-content: space-between; align-items: center; flex-wrap: wrap; margin: 24px 0; }
+    .nav-position { font-size: .85rem; color: #61726a; }
+    .nav-steps { display: flex; gap: 8px; }
+    .letter-heading { margin: 32px 0 20px; }
+    .letter-summary { max-width: 980px; font: 1.15rem/1.7 Georgia, serif; }
+    .page-pair { margin: 36px 0 48px; --page-ratio: 3 / 4; }
+    .page-pair > h3 { padding-bottom: 12px; border-bottom: 1px solid #d8dcd2; }
+    .page-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+    .page-column { min-width: 0; }
+    .column-label { color: #61726a; margin: 0 0 12px; }
+    figure { margin: 0; }
+    .page-sheet { width: 100%; aspect-ratio: var(--page-ratio); min-height: 0; }
+    .scan-sheet { position: relative; background: #e9e8e0; border-radius: 3px; overflow: hidden; }
+    .scan-sheet img { position: absolute; width: 100%; height: 100%; object-fit: contain; display: block; }
+    .scan-message { position: absolute; inset: 24px; margin: 0; line-height: 1.6; overflow: auto; }
+    .transcript-sheet { background: #fffdf7; padding: clamp(20px, 3vw, 44px); overflow: auto;
+      border-radius: 3px; box-shadow: inset 3px 0 #d9e1d3, 0 2px 12px #283b3a06; scrollbar-gutter: stable; }
+    .transcript-sheet pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 1.05rem/1.8 Georgia, serif; margin: 0; }
+    .transcript-sheet h4 { font-size: .85rem; font-weight: 600; margin: 24px 0 10px; }
+    .transcript-sheet .page-status { margin-top: 0; font-size: .8rem; color: #61726a; }
+    figcaption { font-size: .8rem; line-height: 1.5; color: #61726a; overflow-wrap: anywhere; margin-top: 12px; }
+    figcaption a { display: block; margin-top: 6px; }
+    .reading-help { font-size: .85rem; color: #61726a; }
+    .panel { margin-top: 28px; padding: 26px; background: #fffdf8; border-radius: 6px; overflow-wrap: anywhere; }
+    .panel h3:first-child { margin-top: 0; }
+    .metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-bottom: 0; }
+    dt { color: #61726a; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    dd { margin: 0; line-height: 1.5; white-space: pre-wrap; }
+    pre, .preserve { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .notice { padding: 14px 18px; background: #f1ead6; border-left: 3px solid #a78d4f; line-height: 1.6; }
+    .provenance { margin-top: 24px; }
+    .provenance summary { cursor: pointer; padding: 12px 0; }
+    .provenance pre { font: .8rem/1.6 monospace; }
+    @media (max-width: 760px) {
+      body { padding: 20px 16px 36px; }
+      .page-columns, .metadata-grid { grid-template-columns: 1fr; }
+      .page-columns { gap: 20px; }
+      .transcript-sheet { aspect-ratio: auto; overflow: visible; }
+      .folder > summary { padding: 18px 16px; }
+      th, td { padding: 12px 16px; min-width: 130px; }
+      .catalogue-summary-row td { padding: 0 16px 16px; }
+      .nav-position { width: 100%; order: 3; }
+      .panel { padding: 20px; }
+    }
+  </style>
+  <style id="fieldnotes-controls">
+    select { font: inherit; max-width: 100%; }
+    .browse-controls { margin-top: 16px; gap: 16px; align-items: end; }
+    .browse-controls label { margin-bottom: 0 !important; }
+    .browse-controls select { display: block; margin-top: 8px; }
+    figcaption button { margin-inline-start: 8px; }
+    .scan-dialog { max-width: 96vw; max-height: 94vh; overflow: auto; border: 1px solid #c5cec7; border-radius: 6px; background: #fffdf8; }
+    .scan-dialog img { display: block; max-width: none; margin-top: 16px; }
+  </style>
+</head>
+<body data-note="<?= noteId ?>" data-query="<?= query ?>" data-mode="<?= mode ?>" data-collector="<?= collector ?>" data-group="<?= group ?>" data-sort="<?= sort ?>" data-url="<?= appUrl ?>">
+  <header class="site-header">
+    <h1><a href="<?= appUrl ?>">Museum field notes</a></h1>
+    <p class="muted">Bird observations from the collection</p>
+  </header>
+  <p id="initial-error" role="alert"><?= error ?></p>
+  <p id="message" role="status" aria-live="polite"></p>
+  <main>
+    <section id="catalogue" hidden>
+      <p class="eyebrow">Browse the archive</p>
+      <h2 id="browse-title">Collector folders</h2>
+      <p class="intro muted" id="browse-intro">Expand a collector folder to browse by species and collection number. Select a note to read its original pages and transcription.</p>
+      <form id="search">
+        <label for="query">Search collectors, collection numbers, species, localities, or saved text</label>
+        <div class="search-controls"><input id="query" type="search" maxlength="200" placeholder="Search the collection…">
+          <button type="submit">Search</button><button id="clear-search" type="button">Show all</button></div>
+        <div class="search-controls browse-controls">
+          <label for="browse-mode">Browse by <select id="browse-mode" class="button"><option value="collector">Collector</option><option value="species">Species</option></select></label>
+          <label for="collector-filter">Collector <select id="collector-filter" class="button"><option value="">All collectors</option></select></label>
+          <label for="sort-order">Sort by <select id="sort-order" class="button"><option value="number">Collection number</option><option value="species">Species</option></select></label>
+        </div>
+      </form>
+      <div id="results"></div>
+    </section>
+    <article id="record" hidden></article>
+  </main>
+  <footer class="site-footer">
+    <p class="footer-links">
+      <a href="https://github.com/erl67/museum-field-note-transcriber" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>
+      <span>Contact: <a href="mailto:ERL67@pitt.edu">ERL67@pitt.edu</a></span>
+      <a href="https://ericlaslo.com/birds">ericlaslo.com/birds</a>
+    </p>
+    <p>This is an unofficial, independently created and maintained website. It is not owned, operated, sponsored, or endorsed by Carnegie Museums of Pittsburgh or Carnegie Museum of Natural History (CMNH). The content presented here is independently maintained and does not represent official museum communications or institutional positions.</p>
+  </footer>
+  <script>
+/* Source for the inline Viewer.html script. Run scripts/build_viewer.py after edits. */
+'use strict';
+function element(tag, text, parent, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  if (className) node.className = className;
+  if (parent) parent.appendChild(node);
+  return node;
+}
+const state = { query: document.body.dataset.query || '', mode: document.body.dataset.mode || 'collector',
+  collector: document.body.dataset.collector || '', group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
+let expanded = {};
+try { expanded = JSON.parse(sessionStorage.getItem('fieldnotes-folders') || '{}'); } catch (error) { expanded = {}; }
+function urlFor(id, group) {
+  const values = { ...state, group: group === undefined ? state.group : group };
+  if (id) values.note = id;
+  return document.body.dataset.url + '?' + Object.entries(values).filter(([, v]) => v).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+}
+function linkTo(id, label, parent, group) {
+  const a = element('a', label, parent); a.href = urlFor(id, group); return a;
+}
+function defaultFolderExpanded(folder) { return state.mode === 'collector' && folder.name === 'Carriker'; }
+function expansionKey(folder) { return JSON.stringify([state.mode, state.collector, state.query, folder.key]); }
+function pageCountLabel(count) { return count + (count === 1 ? ' page' : ' pages'); }
+function renderFolders(result) {
+  const root = document.getElementById('results'); root.replaceChildren();
+  document.getElementById('message').textContent = result.total + ' note(s) in ' + result.folders.length + (state.mode === 'collector' ? ' collector folder(s)' : ' species group(s)');
+  document.getElementById('browse-title').textContent = state.mode === 'collector' ? 'Collector folders' : 'Species groups';
+  document.getElementById('browse-intro').textContent = state.mode === 'collector' ?
+    'Expand a folder to browse notes by species and collection number. The most recently processed collector appears first. Number order is not chronological.' :
+    'Browse source names and reviewed aliases across collectors. Alternative identifications stay uncertain. A note may appear under more than one name.';
+  const filter = document.getElementById('collector-filter'); filter.replaceChildren();
+  element('option', 'All collectors', filter).value = '';
+  for (const collector of result.collectors) element('option', collector, filter).value = collector;
+  filter.value = state.collector;
+  if (!result.folders.length) element('p', state.query ? 'No notes match this search.' : 'No notes are available in this export.', root);
+  for (const folder of result.folders) {
+    const details = element('details', null, root, 'folder'), key = expansionKey(folder);
+    details.open = Object.prototype.hasOwnProperty.call(expanded, key) ? expanded[key] : Boolean(state.query || state.group === folder.key || defaultFolderExpanded(folder));
+    details.addEventListener('toggle', () => {
+      expanded[key] = details.open;
+      try { sessionStorage.setItem('fieldnotes-folders', JSON.stringify(expanded)); } catch (error) { /* Optional session persistence. */ }
+    });
+    const heading = element('summary', folder.name, details);
+    element('span', folder.notes.length + ' note(s)' + (state.mode === 'species' ?
+      ' · ' + (folder.rank || 'unknown rank') + ' · ' + folder.uncertain + ' uncertain' : ''), heading, 'folder-count');
+    const wrap = element('div', null, details, 'table-wrap'), table = element('table', null, wrap);
+    table.setAttribute('aria-label', 'Notes in ' + folder.name);
+    const header = element('tr', null, element('thead', null, table));
+    for (const label of ['Species', 'Collection number(s)', 'Collector', 'Reading']) element('th', label, header).scope = 'col';
+    const body = element('tbody', null, table);
+    for (const note of folder.notes) {
+      const row = element('tr', null, body), cat = note.catalogue;
+      element('td', cat.species, row); element('td', cat.number_label, row);
+      element('td', cat.collector, row);
+      const reading = element('td', null, row), a = linkTo(note.note_id, 'Read note →', reading, folder.key);
+      a.setAttribute('aria-label', 'Read note: ' + cat.title + ', ' + cat.collector + ', ' + note.note_id);
+      element('span', pageCountLabel(note.page_count) + ' · ' + note.execution, reading, 'field-note');
+      if (note.summary_snippet) {
+        const summaryRow = element('tr', null, body, 'catalogue-summary-row'), cell = element('td', null, summaryRow); cell.colSpan = 4;
+        element('p', note.summary_snippet, cell, 'catalogue-summary');
+      }
+    }
+    if (!state.query && folder.is_latest && result.folders.length > 1) element('hr', null, root, 'folder-divider');
+  }
+}
+let catalogueRequest = 0;
+function loadFolders() {
+  const request = ++catalogueRequest;
+  document.getElementById('catalogue').hidden = false; document.getElementById('record').hidden = true;
+  document.getElementById('message').textContent = 'Loading field notes…';
+  google.script.run.withSuccessHandler(result => { if (request === catalogueRequest) renderFolders(result); })
+    .withFailureHandler(error => { if (request === catalogueRequest) document.getElementById('message').textContent = error.message; }).listFolders({ ...state });
+}
+function renderNavigation(root, navigation, position) {
+  const nav = element('nav', null, root, 'letter-nav'); nav.setAttribute('aria-label', 'Note navigation ' + position);
+  const back = element('a', '← Browse notes', nav, 'button'); back.href = urlFor(null);
+  if (!navigation) return;
+  element('span', navigation.position ? 'Note ' + navigation.position + ' of ' + navigation.total : 'Outside current browse selection', nav, 'nav-position');
+  const steps = element('div', null, nav, 'nav-steps');
+  for (const [key, label] of [['previous', '← Previous note'], ['next', 'Next note →']]) {
+    if (navigation[key]) {
+      const a = linkTo(navigation[key].note_id, label, steps); a.className = 'button'; a.rel = key === 'previous' ? 'prev' : 'next';
+    } else element('span', label, steps, 'button disabled').setAttribute('aria-disabled', 'true');
+  }
+}
+
+    function renderPage(root, scan, page, note, number, jobs) {
+      const pair = element('section', null, root, 'page-pair');
+      pair.dataset.imageId = scan ? scan.image_id : page.image_id;
+      element('h3', 'Page ' + number, pair);
+      const columns = element('div', null, pair, 'page-columns');
+      const figure = element('figure', null, columns, 'page-column');
+      element('p', 'Original scan', figure, 'column-label');
+      const sheet = element('div', null, figure, 'page-sheet scan-sheet');
+      const canLoad = scan && ['mapped', 'folder_lookup'].includes(scan.mapping_status);
+      const scanMessage = !scan ? 'No source scan is listed for this transcription.' :
+        scan.status === 'missing' ? 'Scan missing from local inventory.' :
+        scan.status !== 'ready' ? 'Inventory scan state: ' + scan.status :
+        !canLoad ? 'No Google Drive mapping supplied. Configure the collection scan folder or an image mapping.' : 'Loading scan…';
+      const message = element('p', scanMessage, sheet, 'scan-message');
+      const caption = element('figcaption', scan ? scan.order + '. ' + scan.path : page.image_id, figure);
+      if (canLoad && scan.status === 'ready') jobs.push({ scan, pair, sheet, caption, message });
+      const text = element('section', null, columns, 'page-column');
+      element('p', 'Source-language transcription', text, 'column-label');
+      const transcript = element('div', null, text, 'page-sheet transcript-sheet');
+      transcript.tabIndex = 0;
+      transcript.setAttribute('role', 'region');
+      transcript.setAttribute('aria-label', 'Transcription, page ' + number);
+      if (!page) element('p', 'No complete transcription is available for this page.', transcript);
+      else {
+        if (page.status !== 'text') element('p', 'Page status: ' + page.status, transcript, 'page-status');
+        element('pre', page.text, transcript);
+        for (const note of page.annotations || []) {
+          element('h4', 'Annotation (' + note.kind + ')', transcript);
+          element('pre', note.text, transcript);
+        }
+      }
+      for (const translation of note.translations || []) {
+        if (translation.image_id !== pair.dataset.imageId) continue;
+        element('h4', 'Optional translation · ' + translation.language, transcript);
+        element('pre', translation.text, transcript);
+      }
+    }
+    function loadScans(jobs, result) {
+      // Sequential downloads preserve positions and bound simultaneous image memory.
+      const job = jobs.shift();
+      if (!job) return;
+      google.script.run.withSuccessHandler(answer => {
+        job.message.textContent = answer.message || '';
+        if (answer.status === 'ready') {
+          const image = element('img', null, job.sheet);
+          image.alt = job.scan.filename;
+          image.onload = () => {
+            if (image.naturalWidth && image.naturalHeight) job.pair.style.setProperty('--page-ratio', image.naturalWidth + ' / ' + image.naturalHeight);
+          };
+          image.onerror = () => { image.hidden = true; job.message.textContent = 'Image bytes could not be displayed.'; };
+          image.src = answer.data;
+          const enlarge = element('button', 'Enlarge scan', job.caption);
+          enlarge.addEventListener('click', () => enlargeScan(answer.data, job.scan.filename));
+          if (answer.url) {
+            const a = element('a', 'Open original in Drive ↗', job.caption);
+            a.href = answer.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+          }
+        }
+        loadScans(jobs, result);
+      }).withFailureHandler(error => { job.message.textContent = error.message; loadScans(jobs, result); })
+        .loadImage({ token: result.token, note_id: result.note.note_id, image_id: job.scan.image_id });
+    }
+
+
+function enlargeScan(data, filename) {
+  const dialog = element('dialog', null, document.body, 'scan-dialog');
+  const close = element('button', 'Close enlarged scan', dialog);
+  close.addEventListener('click', () => { dialog.close(); dialog.remove(); });
+  dialog.addEventListener('cancel', () => dialog.remove());
+  const image = element('img', null, dialog); image.src = data; image.alt = filename;
+  dialog.showModal();
+}
+function renderMetadata(root, note) {
+  const section = element('section', null, root, 'panel'); element('h3', 'Note details', section);
+  const grid = element('dl', null, section, 'metadata-grid');
+  const values = [['Collector', note.catalogue.collector + ' (' + note.catalogue.collector_basis + ')'],
+    ['Collection number(s)', note.catalogue.number_label], ['Species', note.catalogue.species],
+    ['Archival ID', note.note_id], ['Transcription', note.execution], ['Grouping', note.grouping],
+    ['Metadata review', note.metadata_review], ['Transcription review', note.transcription_review]];
+  for (const [label, text] of values) {
+    const item = element('div', null, grid); element('dt', label, item); element('dd', text, item);
+  }
+  for (const [key, label] of [['collector','Collector as written'], ['language','Language'], ['document_type','Document type'], ['physical_hand','Physical hand']]) {
+    const field = (note.metadata || {})[key];
+    if (!field || !field.value) continue;
+    const item = element('div', null, grid); element('dt', label, item); element('dd', field.value + ' (' + field.certainty + ')', item);
+  }
+  for (const key of ['identifiers', 'taxa', 'localities', 'dates', 'observations']) {
+    if (!(note[key] || []).length) continue;
+    element('h3', key[0].toUpperCase() + key.slice(1), section);
+    for (const field of note[key]) element('p', (field.entry_id ? field.entry_id + ' · ' : '') + (field.value || 'Unknown') +
+      ' (' + field.certainty + ')' + [field.number_type, field.namespace, field.rank, field.role, field.event, field.kind,
+        field.source_uncertain || field.alternative_group ? 'uncertain identification' : ''].filter(Boolean).map(v => ' · ' + v).join(''), section, 'preserve');
+  }
+  if ((note.notes || []).length) { element('h3', 'Separate notes', section); element('p', note.notes.join('\n'), section, 'preserve'); }
+  if (note.active === false) element('p', 'Retired grouping retained for history.', section, 'notice');
+}
+function renderNote(result) {
+  Object.assign(state, result.context || {});
+  const root = document.getElementById('record'); root.replaceChildren(); root.hidden = false;
+  document.getElementById('catalogue').hidden = true;
+  const note = result.note;
+  renderNavigation(root, result.navigation, 'top');
+  const heading = element('header', null, root, 'letter-heading');
+  element('p', note.catalogue.collector, heading, 'eyebrow'); element('h2', note.catalogue.title, heading);
+  element('p', pageCountLabel(note.scans.length) + ' · ' + note.execution, heading, 'muted');
+  if (note.summary) {
+    const summary = element('section', null, root, 'letter-summary');
+    element('p', 'Interpretive summary', summary, 'eyebrow'); element('p', note.summary, summary);
+  }
+  element('p', 'Each scan is paired with its transcription. Longer transcriptions scroll within their panel.', root, 'reading-help');
+  const jobs = [], pages = new Map(note.pages.map(p => [p.image_id, p]));
+  note.scans.forEach((scan, index) => renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs));
+  const scans = new Set(note.scans.map(s => s.image_id)); let number = note.scans.length;
+  for (const page of note.pages) if (!scans.has(page.image_id)) renderPage(root, null, page, note, ++number, jobs);
+  if (!number) element('p', 'No source pages or complete transcription are available.', root, 'notice');
+  renderMetadata(root, note);
+  const details = element('details', null, root, 'provenance');
+  element('summary', result.publicMode ? 'Metadata evidence' : 'Metadata evidence and provenance', details);
+  const evidence = { metadata: note.metadata, entries: note.entries, identifiers: note.identifiers, taxa: note.taxa,
+    localities: note.localities, dates: note.dates, observations: note.observations };
+  if (!result.publicMode) Object.assign(evidence, { review_reasons: note.review_reasons, provenance: note.provenance, partial_response: note.partial_response });
+  element('pre', JSON.stringify(evidence, null, 2), details);
+  renderNavigation(root, result.navigation, 'bottom'); loadScans(jobs, result);
+}
+function openNote(id) {
+  document.getElementById('message').textContent = 'Loading note…';
+  google.script.run.withSuccessHandler(result => { document.getElementById('message').textContent = ''; renderNote(result); })
+    .withFailureHandler(error => { document.getElementById('message').textContent = error.message;
+      const root = document.getElementById('record'); root.hidden = false; renderNavigation(root, null, 'error'); }).loadNote(id, { ...state });
+}
+document.getElementById('query').value = state.query;
+document.getElementById('browse-mode').value = state.mode;
+document.getElementById('sort-order').value = state.sort;
+document.getElementById('search').addEventListener('submit', event => {
+  event.preventDefault(); state.query = document.getElementById('query').value; state.group = ''; loadFolders();
+});
+document.getElementById('clear-search').addEventListener('click', () => {
+  document.getElementById('query').value = ''; state.query = ''; state.collector = ''; state.group = ''; loadFolders();
+});
+for (const [id, key] of [['browse-mode', 'mode'], ['collector-filter', 'collector'], ['sort-order', 'sort']]) {
+  document.getElementById(id).addEventListener('change', () => { state[key] = document.getElementById(id).value; state.group = ''; loadFolders(); });
+}
+if (!document.getElementById('initial-error').textContent.trim()) {
+  if (document.body.dataset.note) openNote(document.body.dataset.note); else loadFolders();
+}
+
+  </script>
+</body>
+</html>

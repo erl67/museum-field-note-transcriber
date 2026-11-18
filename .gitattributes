@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+apps_script/viewer/reference.css text eol=lf
+apps_script/viewer/Viewer.html text eol=lf
+apps_script/viewer/client.js text eol=lf

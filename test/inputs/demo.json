@@ -1,0 +1,31 @@
+{
+  "description": "Invented software examples. No historical readings or verified handwriting samples.",
+  "notes": [
+    {
+      "key": "valley",
+      "summary": "Synthetic example of two numbered passages on one sheet and a continuation.",
+      "species": "Example marsh bird",
+      "pages": [
+        {"path": "Carriker/valley.jpg", "size": [900, 570], "text": "Example marsh bird\n\nNorth valley (0012). At the reeds.\nSouth bank (12a). At the edge of the water."},
+        {"path": "Carriker/continuation.jpg", "size": [590, 780], "text": "Continuation\n\nSouth bank. In March.\nA second observation by the water."}
+      ],
+      "passages": [
+        {"key": "north", "number": "0012", "locality": "North valley"},
+        {"key": "south", "number": "12a", "locality": "South bank"}
+      ]
+    },
+    {
+      "key": "ridge",
+      "summary": "Synthetic example with a locality heading and no recorded species.",
+      "pages": [{"path": "Carriker/ridge.jpg", "size": [850, 500], "text": "East ridge (24)\n\nAbove the meadow."}],
+      "passages": [{"key": "ridge", "number": "24", "locality": "East ridge"}]
+    },
+    {
+      "key": "other",
+      "summary": "Synthetic example of the same number in another collector folder.",
+      "species": "Example marsh bird",
+      "pages": [{"path": "Avery/pond.jpg", "size": [780, 540], "text": "Example marsh bird\n\nMill pond (0012)."}],
+      "passages": [{"key": "pond", "number": "0012", "locality": "Mill pond"}]
+    }
+  ]
+}
