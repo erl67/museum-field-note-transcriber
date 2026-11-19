@@ -87,3 +87,6 @@ class SchemaTests(Workspace):
             if text=='Instructions': continue
             self.assertIn(text,POLICY)
         self.assertIn('unknown',POLICY)
+        self.assertIn('"kind": "marginal", "text":', POLICY)
+        self.assertIn("Notes is an array of plain strings", POLICY)
+        self.assertIn("Each entry belongs to exactly one image_id", POLICY)

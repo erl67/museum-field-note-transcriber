@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from PIL import Image, ImageOps
 from . import SCHEMA_VERSION, __version__
+from .card_backs import card_side
 from .prompt import PROMPT_VERSION, build_prompt
 from .storage import digest, encoded
 from .paths import inside
@@ -40,6 +41,8 @@ def prepare_image(raw, max_edge=0, apply_orientation=False):
 
 
 def prepare_request(inventory, note, config, profile=None, *, authorities=None):
+    if (note.get("override") or {}).get("kind") == "awaiting_back":
+        raise ValueError("Awaiting the next chronological scan for this card's back")
     if not note["active"] or note["grouping"] not in {"provisional", "reviewed"}:
         raise ValueError("Grouping needs a reviewed override before transcription")
     images = {i["image_id"]: i for i in inventory["images"]}
@@ -49,7 +52,7 @@ def prepare_request(inventory, note, config, profile=None, *, authorities=None):
     prompt = build_prompt(note, profile, authorities)
     manifest, data = [], []
     size = len(encoded(config.generation())) + len(prompt.encode("utf-8")) * 6 + 8192
-    for iid in note["image_ids"]:
+    for page_number, iid in enumerate(note["image_ids"], 1):
         item = images[iid]
         if item["status"] != "ready":
             raise ValueError(f"Image unavailable ({item['status']}): {item['path']}")
@@ -61,11 +64,16 @@ def prepare_request(inventory, note, config, profile=None, *, authorities=None):
         with Image.open(BytesIO(submitted)) as prepared:
             submitted_dimensions = list(prepared.size)
         label = f"PAGE image_id={iid}; original relative path={item['path']}"
+        side = card_side(note, page_number)
+        if side:
+            label += f"; card side={side}"
         manifest.append(dict(image_id=iid, path=item["path"], label=label,
                              original_sha256=item["sha256"], original_bytes=len(raw), dimensions=item.get("dimensions"),
                              submitted_sha256=digest(submitted),
                              submitted_bytes=len(submitted), submitted_dimensions=submitted_dimensions,
                              transformations=operations))
+        if side:
+            manifest[-1]["side"] = side
         data.append(submitted)
         size += 4 * ((len(submitted) + 2) // 3) + len(label.encode("utf-8")) * 6 + 1024
     if size > config.max_request_bytes:

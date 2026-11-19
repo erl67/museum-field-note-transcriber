@@ -1,16 +1,34 @@
 """One scan per provisional note. Grouping and reconciliation are always explicit."""
-from collections import Counter, defaultdict
+from collections import defaultdict
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
+import re
 import uuid
 from PIL import Image
+from .card_backs import from_card_back_log, read_card_backs
 from .paths import inside, relative_path
 from .storage import digest
 
 
 def stable(prefix, collection, key):
     return prefix + uuid.uuid5(uuid.UUID(collection), key).hex
+
+
+def scan_order(notes, images):
+    """Queue whole notes by their first page's folder and scan filename."""
+    paths = {image["image_id"]: image["path"] for image in images}
+
+    def key(note):
+        path = paths[note["image_ids"][0]]
+        # Scanner filenames encode year/month/day/time. Numeric chunks also keep
+        # set2 before set10 and give other filenames a predictable natural order.
+        natural = tuple(tuple((0, int(part)) if part.isascii() and part.isdigit() else (1, part.casefold())
+                              for part in re.split(r"([0-9]+)", component) if part)
+                        for component in relative_path(path).parts)
+        return natural, path, note["note_id"]
+
+    return sorted(notes, key=key)
 
 
 def inspect_file(path, root, collection, previous):
@@ -49,10 +67,21 @@ def inspect_file(path, root, collection, previous):
     return row
 
 
-def regroup(inventory, overrides):
+def regroup(inventory, overrides, card_backs=None):
     if (not isinstance(overrides, dict) or overrides.get("version") != 1
             or not isinstance(overrides.get("groups"), list)):
         raise ValueError("Grouping needs version 1 and a groups array")
+    if card_backs is None and "overrides" in inventory:
+        card_backs = [g for g in inventory["overrides"]["groups"] if from_card_back_log(g)]
+    if card_backs is not None:
+        manual = [g for g in overrides["groups"] if not from_card_back_log(g)]
+        # Keep the alternating sequence aligned when a manual note spans whole cards.
+        owners = {p: index for index, g in enumerate(manual) if isinstance(g, dict)
+                  and isinstance(g.get("paths"), list) for p in g["paths"] if isinstance(p, str)}
+        card_backs = [g for g in card_backs if not (g.get("mode") == "all-pairs"
+                      and g["kind"] == "front_back" and g["paths"][0] in owners
+                      and owners[g["paths"][0]] == owners.get(g["paths"][1]))]
+        overrides = dict(overrides, groups=manual + card_backs)
     updated = deepcopy(inventory)
     images = {i["path"]: i for i in updated["images"]}
     old = {n["note_id"]: n for n in inventory.get("notes", [])}
@@ -67,9 +96,12 @@ def regroup(inventory, overrides):
         collectors = list(dict.fromkeys(i["collector_folder"] for i in members))
         if len(collectors) > 1:
             reasons.append("Explicit group spans collector folders; attribution needs review")
+        waiting = (override or {}).get("kind") == "awaiting_back"
+        if waiting:
+            reasons.append("Awaiting the next chronological scan for this card's back")
         notes.append(dict(note_id=nid, group_key=key, active=True,
                           image_ids=[i["image_id"] for i in members],
-                          grouping="needs_review" if "ambiguous_path" in states else "reviewed" if override else "provisional",
+                          grouping="needs_review" if waiting or "ambiguous_path" in states else "reviewed" if override else "provisional",
                           discovery="ready" if all(s == "ready" for s in states) else "unavailable",
                           hints=dict(collector_folder=collectors[0], collector_folders=collectors,
                                      filenames=[i["filename"] for i in members]),
@@ -84,12 +116,24 @@ def regroup(inventory, overrides):
             raise ValueError("Grouping paths must be a nonempty ordered array")
         for p in paths:
             relative_path(p)
-        nid = group.get("note_id") or old_keys.get(key) or stable("note_", inventory["collection_id"], key)
+        for p in paths:
+            if p not in images or p in claimed:
+                raise ValueError(f"Unknown or already grouped scan: {p} ({group['source']})")
+        identity_key = key
+        if group.get("kind") == "awaiting_back":
+            if len(paths) != 1:
+                raise ValueError("A card awaiting its back must have one front")
+            identity_key = "single:" + images[paths[0]]["image_id"]
+        elif group.get("kind") == "front_back":
+            if len(paths) != 2 or images[paths[0]]["folder"] != images[paths[1]]["folder"]:
+                raise ValueError("A front and back must be two scans from the same folder")
+            identity_key = "single:" + images[paths[0]]["image_id"]
+        nid = (group.get("note_id") or old_keys.get(key) or old_keys.get(identity_key)
+               or stable("note_", inventory["collection_id"], identity_key))
         if group.get("note_id") and nid not in old:
             raise ValueError("Retained note_id must already exist; omit it for a new note")
-        if (key in keys or nid in used or len(set(paths)) != len(paths)
-                or any(p in claimed or p not in images for p in paths)):
-            raise ValueError("Duplicate group, page or note ID, or unknown path")
+        if key in keys or nid in used or len(set(paths)) != len(paths):
+            raise ValueError("Duplicate group, page or note ID")
         keys.add(key); claimed.update(paths)
         add(key, nid, paths, group)
     for path, image in images.items():
@@ -105,7 +149,7 @@ def regroup(inventory, overrides):
     return updated
 
 
-def discover(root, previous=None, overrides=None, generated_paths=()):
+def discover(root, previous=None, overrides=None, generated_paths=(), *, card_back_log=None, complete_sets=()):
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError(f"Input root is unavailable: {root}; saved records remain usable offline")
@@ -114,19 +158,32 @@ def discover(root, previous=None, overrides=None, generated_paths=()):
         raise ValueError("Store belongs to another input root; do not replace its history")
     collection = previous.get("collection_id", str(uuid.uuid5(uuid.NAMESPACE_URL, str(root))))
     old = {i["path"]: i for i in previous.get("images", [])}
+    complete_sets = set(complete_sets)
+    for name in complete_sets:
+        if len(relative_path(name).parts) < 2 or not inside(root, name).is_dir():
+            raise ValueError(f"Expected an existing collector/set folder for --complete-set: {name}")
+    # Saved members stay addressable. Only an explicit completion admits new members.
+    scan_folders = complete_sets | {i["folder"] for i in old.values() if "/" in i["folder"]}
+    branches = {parent.as_posix() for name in scan_folders for parent in (Path(name), *Path(name).parents)}
     assigned_ids = {i["image_id"] for i in old.values()}
     images, issues = [], []
     generated = set(generated_paths)
     def walk_error(error):
         issues.append(dict(path=str(error.filename), status="unavailable_directory", error=str(error)))
     for folder, dirs, files in root.walk(on_error=walk_error, follow_symlinks=False):
+        relative = folder.relative_to(root)
+        if relative.parts:
+            dirs[:] = [name for name in dirs if (relative / name).as_posix() in branches]
         for name in list(dirs):
             path = folder / name
             if path.is_symlink() or path.is_junction():
                 dirs.remove(name); files.append(name)
         for name in sorted(files):
             path = folder / name
-            if path.relative_to(root).as_posix() not in generated:
+            rel = (relative / name).as_posix()
+            if len(relative.parts) >= 2 and relative.as_posix() not in complete_sets and rel not in old:
+                continue
+            if rel not in generated:
                 row = inspect_file(path, root, collection, old)
                 if row["path"] not in old:
                     # An externally moved, reconciled image may still own the original path-derived ID.
@@ -160,7 +217,13 @@ def discover(root, previous=None, overrides=None, generated_paths=()):
                 row["warnings"].append("Case-insensitive duplicate path")
     inventory = dict(schema_version=1, collection_id=collection, input_root=str(root),
                      images=images, notes=deepcopy(previous.get("notes", [])), issues=issues)
-    return regroup(inventory, overrides if overrides is not None else previous.get("overrides", {"version": 1, "groups": []}))
+    if "overrides" in previous:
+        inventory["overrides"] = previous["overrides"]
+    if overrides is None:
+        overrides = previous.get("overrides", {"version": 1, "groups": []})
+    saved = previous.get("overrides", {}).get("groups", [])
+    pairs = read_card_backs(card_back_log, images, saved, scan_folders) if card_back_log is not None else None
+    return regroup(inventory, overrides, pairs)
 
 
 def reconcile_paths(inventory, mapping):

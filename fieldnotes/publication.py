@@ -1,7 +1,9 @@
 """Opt-in managed outputs; explicit destination each time, never automatic publication."""
+from collections import defaultdict
 from pathlib import Path
-from .exports import collector_filename, reading
-from .paths import inside
+from .catalogue import note_number_key
+from .exports import reading
+from .paths import inside, relative_path
 from .review import current_records
 from .storage import atomic_bytes, digest
 
@@ -25,21 +27,41 @@ def generated_paths(store, input_root):
     return paths
 
 
+def set_readers(store, inventory):
+    images = {image["image_id"]: image for image in inventory["images"]}
+    records = sorted((r for r in current_records(store, inventory) if r["active"]), key=note_number_key)
+    by_folder = defaultdict(list)
+    for record in records:
+        folders = {relative_path(images[iid]["path"]).parent for iid in record["image_ids"]}
+        text = reading(record, images)
+        for folder in folders:
+            by_folder[folder].append(text)
+
+    files, used = {}, set()
+    for folder, texts in sorted(by_folder.items()):
+        if len(folder.parts) >= 2:
+            target = folder.parent / (folder.name + ".txt")
+        else:
+            target = folder / "Unfiled_transcriptions.txt"
+        name = target.as_posix()
+        if name.casefold() in used:
+            raise ValueError(f"Scan folders would share the same publication filename: {name}")
+        used.add(name.casefold())
+        heading = folder.as_posix() if folder.parts else "Scans at the collection root"
+        files[name] = (heading + "\n\n" + "\n\n".join(texts)).encode("utf-8")
+    for name in files:
+        if any(parent.as_posix().casefold() in used for parent in relative_path(name).parents):
+            raise ValueError(f"A set reader would occupy a folder needed by another reader: {name}")
+    return files
+
+
 def publish(store, inventory, output, destination):
     """Caller holds store lock. Journal ownership before writes; archive before replacement."""
     root, output = Path(destination).resolve(), Path(output)
     if not root.is_dir():
         raise ValueError("Publication destination must be an existing accessible directory")
-    records = [r for r in current_records(store, inventory) if r["active"]]
-    images = {i["image_id"]: i for i in inventory["images"]}
-    files = {"Field_notes/" + r["note_id"] + ".txt": reading(r, images).encode("utf-8") for r in records}
-    for collector in {r["catalogue"]["collector_folder"] for r in records}:
-        name = collector_filename(collector)
-        files["Field_notes/" + name] = (output / "collectors" / name).read_bytes()
-    files["Field_notes_transcriptions.txt"] = (output / "combined.txt").read_bytes()
+    files = set_readers(store, inventory)
     files["Field_notes_viewer.json"] = (output / "Field_notes_viewer.json").read_bytes()
-    if len({p.casefold() for p in files}) != len(files):
-        raise ValueError("Publication output-name collision")
     owned = state_for(store, root).get("files", {})
     source_paths = {str((Path(inventory["input_root"]) / i["path"]).resolve()).casefold() for i in inventory["images"]}
     pending, archived = {}, {}

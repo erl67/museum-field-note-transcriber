@@ -10,8 +10,8 @@ Run `& $py -m fieldnotes export` to rebuild the current collection under `local/
 | `details/note_<id>.txt` | Staff reading plus selected result, provenance, correction history or available partial response. Follow journal attempt references for original response blobs and other revisions. |
 | `combined.txt`, `collectors/collector_<hash>.txt` | Collection and folder readings for active notes, ordered by collection number. The collector filename comes from its folder label. Metadata changes do not rename note files. |
 | `records.json` | Versioned inventory, selected canonical/reviewed records and authorities, including unknowns and retired groups. Previous revisions remain in the journal. |
-| `catalogue.csv` | One row per note with identity, active flag, folder/display attribution, species and number labels, states, page count, summary and report path. Use related tables for individual readings. |
-| `images.csv`, `entries.csv` | Ordered page membership, source properties, image IDs and section labels. Images can also occur in retired group history. |
+| `catalogue.csv` | One row per note with identity, active flag, folder/display attribution, species and number labels, states, page count, summary and report path. The `scan_sets` column lists the physical folders beneath a collector, such as `Carriker/set1`. |
+| `images.csv`, `entries.csv` | Ordered page membership, source properties, image IDs and section labels. The `side` column of `images.csv` identifies an explicitly paired Front or Back. Images can also occur in retired group history. |
 | `identifiers.csv`, `taxa.csv`, `localities.csv`, `dates.csv`, `observations.csv` | One row per item. Keys are `note_id`, array name and zero-based `item_index`. `entry_id` links the passage, `value` is the source reading, and `details_json` contains type-specific fields. |
 | `evidence.csv` | `note_id`, field or array name, item index, image and optional entry ID, quotation or location. `metadata.collector` names a note-wide metadata field. |
 | `Field_notes_viewer.json` | Private viewer bundle with relative paths, ordered scans, saved readings, display projections and restricted provenance. Only the viewer's public projection is suitable for an approved public session. |
@@ -20,7 +20,9 @@ The UTF-8 CSVs include a byte-order mark and quote multiline fields. Import iden
 
 ## Optional managed publication
 
-Ordinary export and transcription write under the local output path. A separate explicit command can copy the active note readers, collector readers, collection reader and viewer JSON into a staff-selected existing destination. Keep the managed destination and local export tree in separate directories. Publication is optional even after a destination has been used. The journal remembers ownership, previous hashes and archives. It never turns on automatic publication.
+Ordinary export and transcription write under the local output path. The explicit publication command writes one UTF-8 text file per scan set to the chosen destination. For example, scans in `Carriker/set1/` and `Carriker/set2/` produce `Carriker/set1.txt` and `Carriker/set2.txt`, beside their scan folders. Each reader is ordered by collection number and keeps all pages of each note together. A note that spans several sets appears in full in each applicable reader. Scans filed directly under a collector or at the collection root go into `Unfiled_transcriptions.txt` in that folder. The Apps Script viewer uses one `Field_notes_viewer.json` at the destination root.
+
+Keep the managed destination and local export tree in separate directories. The journal remembers ownership, previous hashes and archives. Each publication requires an explicit destination.
 
 ```powershell
 # For a local trial, create a dedicated destination outside the scan tree.
@@ -32,7 +34,7 @@ $destination = 'G:\My Drive\Field Notes'
 # With verified optional image mappings, add: --mapping local/drive-mapping.json
 ```
 
-The managed names are `Field_notes/note_<id>.txt`, `Field_notes/collector_<hash>.txt`, `Field_notes_transcriptions.txt` and `Field_notes_viewer.json`. Existing unowned files and externally edited files stop publication. Superseded managed bytes are archived in local store blobs, with the path-to-archive mapping recorded in the pending publication event. Ownership is journalled before writes, each file is replaced atomically, and a completed event records the resulting hashes. After interruption, resolve any external edit and repeat the explicit command with the same store. Back up the store because deleting it also loses ownership evidence.
+Existing unowned files and externally edited files stop publication. Superseded managed bytes are archived in local store blobs, with the path-to-archive mapping recorded in the pending publication event. If the same store previously published a combined collection reader or individual readers to this destination, the next explicit publication archives and retires those managed copies. Ownership is journalled before writes, each file is replaced atomically, and a completed event records the resulting hashes. After interruption, resolve any external edit and repeat the explicit command with the same store. Back up the store because deleting it also loses ownership evidence.
 
 Managed paths in the scan tree are excluded from later discovery for that store. Scans, unrelated text and other applications' outputs are never adopted. Keep the viewer JSON private even when the web viewer is intended for public use.
 

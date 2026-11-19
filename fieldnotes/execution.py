@@ -24,7 +24,7 @@ class Quota:
         self.config, self.clock, self.sleep = config, clock, sleep
         self.path = Path(config.quota_file)
 
-    def update(self, exhaust=False):
+    def update(self, exhaust=False, *, progress=None):
         while True:
             wait = 0
             with lock(self.path.with_suffix(self.path.suffix + ".lock")):
@@ -47,7 +47,9 @@ class Quota:
                     entry["exhausted"] = True
                 else:
                     if entry["exhausted"] or entry["attempts"] >= self.config.daily_limit:
-                        raise QuotaReached("Daily local allocation exhausted; provider quota may also include other apps")
+                        reason = ("Provider daily limit reached" if entry["exhausted"] else
+                                  f"Daily field-note allocation reached ({entry['attempts']} of {self.config.daily_limit} attempts)")
+                        raise QuotaReached(f"{reason}. Resume with --pending after midnight in {self.config.quota_timezone}.")
                     wait = max(0, entry["next_start"] - self.clock())
                     if not wait:
                         entry["attempts"] += 1
@@ -56,6 +58,8 @@ class Quota:
                     state["models"][key] = entry
                     atomic_json(self.path, state)
                     return entry["attempts"]
+            if progress:
+                progress(f"Request pacing. Waiting {wait:.1f}s before the next request.")
             self.sleep(min(wait, 60))
 
 
@@ -126,7 +130,8 @@ def checkpoint_result(store, note, request, outcome, attempt_ids, run_id, saved_
 
 
 def transcribe(store, note, request, config, transport_factory, *, fresh=False,
-               retry_interrupted=False, pending_only=False, run_id=None, sleep=time.sleep, quota=None):
+               retry_interrupted=False, pending_only=False, run_id=None, sleep=time.sleep, quota=None,
+               progress=lambda _message: None):
     run_id = run_id or identity("run_")
     events = store.events()
     starts = [e["data"] for e in events if e["kind"] == "attempt_start"
@@ -161,6 +166,7 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
         store.append("retry_acknowledged", dict(note_id=note["note_id"], attempt_ids=acknowledged,
                      run_id=run_id, reason="Explicit --retry-interrupted; possible repeat charge accepted"))
     # Freeze submitted bytes and the complete request before looking up credentials.
+    progress("Saving the request locally and preparing the Gemini client.")
     for page, data in zip(request["provenance"]["images"], request["image_data"], strict=True):
         store.blob(data, ".jpg")
     request_ref = store.blob(encoded(request["provenance"]), ".json")
@@ -177,10 +183,12 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                 outcome.update(execution="failed", errors=["Format correction exceeds whole-request size limit"])
                 break
             try:
-                quota.update()
+                daily_count = quota.update(progress=progress)
             except QuotaReached as exc:
                 outcome.update(execution="paused", errors=[str(exc)], stop_batch=True)
                 break
+            progress(f"Gemini request {index + 1}/{config.attempts}. Daily attempts "
+                     f"{daily_count:,}/{config.daily_limit:,}. Waiting for Gemini (timeout {config.timeout:g}s).")
             aid = identity("att_")
             ids.append(aid)
             store.append("attempt_start", dict(attempt_id=aid, note_id=note["note_id"],
@@ -188,6 +196,7 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                          prompt_sha256=digest(prompt.encode()), started_at=now(), run_id=run_id,
                          settings=config.public()))
             response, failure, delay, kind, error_ref = None, None, 0, None, None
+            started = time.monotonic()
             try:
                 response = transport.send(request, prompt)
             except (KeyboardInterrupt, SystemExit):
@@ -203,6 +212,7 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                 if body is not None:
                     cleaned = transport.clean_error(ValueError(json.dumps(body, ensure_ascii=False, default=str)))
                     error_ref = store.blob(cleaned.encode("utf-8"), ".json")
+            elapsed = time.monotonic() - started
             # Preserve raw response before validation, including rejected/incomplete content.
             response_ref = store.blob(encoded(response), ".json") if response is not None else None
             usage = read_usage(response)
@@ -210,6 +220,9 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                          cost=estimate(usage, config.model, config.rates), response=response_ref,
                          error=failure, failure_kind=kind, error_response=error_ref))
             if response is not None:
+                total = usage["total"]
+                tokens = f"{total:,} tokens total" if total is not None else "token usage unavailable"
+                progress(f"Gemini responded in {elapsed:.1f}s ({tokens}). Checking the transcription.")
                 checked = interpret(response, note)
                 # A later empty failure must not erase substantive partial text.
                 if not checked["text"] and outcome["text"]:
@@ -226,6 +239,7 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                 if kind in {"daily", "billing", "configuration", "authentication/access", "model/endpoint unavailable"}:
                     if kind == "daily":
                         quota.update(exhaust=True)
+                        outcome["errors"].append(f"Resume with --pending after the daily reset in {config.quota_timezone}.")
                     outcome.update(execution="paused" if kind in {"daily", "billing"} else "failed", stop_batch=True)
                     break
                 if kind != "retry":
@@ -238,6 +252,11 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                     outcome["stop_batch"] = True
                 delay = max(delay, min(60, 5 * 2 ** index))
             if index < config.attempts - 1:
+                if response is not None:
+                    progress("Response format needs correction. Retrying the request with formatting instructions.")
+                else:
+                    progress(f"Gemini request failed after {elapsed:.1f}s. {failure}")
+                    progress(f"Retrying in {delay:.1f}s. Request pacing still applies.")
                 while delay > 0:
                     sleep(min(60, delay))
                     delay -= min(60, delay)

@@ -5,13 +5,13 @@ from io import StringIO
 import json
 from pathlib import Path
 from unittest.mock import patch
-from fieldnotes.cli import main, usage_summary
+from fieldnotes.cli import main, parser, select, usage_summary
 from fieldnotes.discovery import discover
 from fieldnotes.execution import Quota, transcribe
 from fieldnotes.exports import export_all
 from fieldnotes.publication import publish, generated_paths
 from fieldnotes.review import current_records
-from fieldnotes.storage import atomic_json, encoded, Store
+from fieldnotes.storage import atomic_json, digest, encoded, Store
 from fieldnotes.usage import read_usage, aggregate, estimate
 from .helpers import Workspace, Clock, FakeTransport, response, rich_document, jpeg
 
@@ -30,10 +30,48 @@ class CliTests(Workspace):
         self.assertEqual(code,0);self.assertEqual(before,self.snapshot());self.assertIn('zero requests',text)
     def test_inventory_and_offline_exports_without_scans(self):
         jpeg(self.inputs/'C/card.jpg');out=self.root/'exports'
-        self.assertEqual(self.call('inventory','--input',str(self.inputs),'--output',str(out))[0],0)
-        (self.inputs/'C/card.jpg').unlink()
-        before=self.store.journal.read_bytes();self.assertEqual(self.call('export','--output',str(out))[0],0)
-        self.assertEqual(before,self.store.journal.read_bytes());self.assertFalse(Path('local/fieldnotes-quota.json').exists())
+        with patch("fieldnotes.cli.load_config", return_value=self.config):
+            self.assertEqual(self.call('inventory','--input',str(self.inputs),'--output',str(out))[0],0)
+            (self.inputs/'C/card.jpg').unlink()
+            before=self.store.journal.read_bytes();self.assertEqual(self.call('export','--output',str(out))[0],0)
+        self.assertEqual(before,self.store.journal.read_bytes());self.assertFalse(Path(self.config.quota_file).exists())
+    def test_inventory_dry_run_and_selection_use_the_same_set_and_scanner_log(self):
+        for name in ("C/set1/f.jpg", "C/set1/b.jpg", "C/set10/f.jpg", "A/set1/f.jpg", "C/loose.jpg"):
+            jpeg(self.inputs / name)
+        self.store.root.mkdir()
+        log = self.store.root / "card-backs.txt"
+        log.write_text("C/set1 | f.jpg | b.jpg", encoding="utf-8")
+        out = self.root / "exports"
+        before = self.snapshot()
+        code, output = self.call("dry-run", "--input", str(self.inputs))
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count("READY "), 1)  # The loose collector card.
+        completed = ("--complete-set", "C/set1", "--complete-set", "C/set10", "--complete-set", "A/set1")
+        code, output = self.call("dry-run", "--input", str(self.inputs), *completed)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count("READY "), 4)
+        self.assertEqual(before, self.snapshot())
+        code, output = self.call("inventory", "--input", str(self.inputs), "--output", str(out), *completed)
+        self.assertEqual(code, 0, output)
+        code, output = self.call("show", "--set", "C/set1")
+        self.assertEqual(code, 0, output)
+        listing = json.loads(output)
+        self.assertEqual(listing["total"], 1)
+        self.assertEqual(listing["records"][0]["files"], ["f.jpg", "b.jpg"])
+        self.assertEqual(listing["records"][0]["scan_sets"], ["C/set1"])
+        records = current_records(self.store, self.store.latest("inventory"))
+        scope = parser().parse_args(["transcribe", "--pending", "--set", "C/set1"])
+        self.assertEqual([n["note_id"] for n in select(records, scope)], listing["order"])
+        bundle = json.loads((out / "Field_notes_viewer.json").read_text(encoding="utf-8"))
+        paired = next(n for n in bundle["notes"] if n["note_id"] == listing["order"][0])
+        self.assertEqual([s["side"] for s in paired["scans"]], ["Front", "Back"])
+        self.assertEqual(paired["transcription_review"], "unreviewed")
+        log.write_text("C/set1 | b.jpg | typo.jpg", encoding="utf-8")
+        journal = self.store.journal.read_bytes()
+        code, output = self.call("inventory", "--input", str(self.inputs), "--output", str(out))
+        self.assertEqual(code, 1)
+        self.assertIn("card-backs.txt line 1", output)
+        self.assertEqual(self.store.journal.read_bytes(), journal)
     def test_pending_skips_complete_even_after_cache_expiry(self):
         self.setup_note(names=['C/a.jpg']);result=self.save()
         old=dict(result,saved_at=(datetime.now(timezone.utc)-timedelta(days=5)).isoformat());self.store.append('result',old)
@@ -42,6 +80,87 @@ class CliTests(Workspace):
             code,text=self.call('transcribe','--pending','--output',str(self.root/'exports'))
         self.assertEqual(code,0);self.assertEqual(Path(self.config.quota_file).read_bytes(),before)
         self.assertIn('"attempts": 0',text)
+
+    def test_transcription_follows_scan_order_and_preserves_whole_notes(self):
+        groups = json.loads((Path(__file__).parent / "inputs/scan-order.json").read_text(encoding="utf-8"))
+        for group in groups:
+            for name in group:
+                jpeg(self.inputs / name)
+        self.store.root.mkdir()
+        log = self.store.root / "card-backs.txt"
+        log.write_text("\n".join(" | ".join([Path(group[0]).parent.as_posix(),
+                                            *[Path(p).name for p in group]])
+                                 for group in groups if len(group) == 2), encoding="utf-8")
+        folders = sorted({Path(group[0]).parent.as_posix() for group in groups})
+        inventory = discover(self.inputs, card_back_log=log, complete_sets=folders)
+        self.store.append("inventory", inventory)
+        images = {image["image_id"]: image["path"] for image in inventory["images"]}
+        by_front = {images[note["image_ids"][0]]: note for note in inventory["notes"]}
+        ordered = [by_front[group[0]] for group in groups]
+        self.assertNotEqual(inventory["notes"], ordered)  # Inventory stores explicit groups first.
+        original = deepcopy(inventory)
+        fake = FakeTransport([response(rich_document(note["image_ids"])) for note in ordered])
+        clock = Clock()
+        args = ("transcribe", "--pending", "--output", str(self.root / "exports"))
+        with patch("fieldnotes.cli.load_config", return_value=self.config), \
+             patch("fieldnotes.cli.api_key", return_value="dummy"), patch("fieldnotes.cli.Gemini", return_value=fake), \
+             patch("fieldnotes.execution.Quota", side_effect=lambda config, sleep: Quota(config, clock.time, clock.sleep)):
+            code, message = self.call(*args)
+            self.assertEqual(code, 0, message)
+            self.assertIn("Processing order: collector/set", message)
+            code, message = self.call(*args)
+            self.assertEqual(code, 0, message)
+            self.assertIn("Selected 0 cards", message)
+        starts = [event["data"]["note_id"] for event in self.store.events() if event["kind"] == "attempt_start"]
+        self.assertEqual(starts, [note["note_id"] for note in ordered])
+        self.assertEqual(len(fake.calls), len(groups))
+        actual = [[images[page["image_id"]] for page in result["provenance"]["images"]]
+                  for result in self.store.results()]
+        self.assertEqual(actual, groups)
+        self.assertEqual(self.store.latest("inventory"), original)
+
+    def test_pending_batch_uses_last_daily_attempt_for_a_whole_card_and_resumes_next_day(self):
+        for name, color in (("front.jpg", "red"), ("back.jpg", "blue"), ("next.jpg", "green")):
+            jpeg(self.inputs / "C/set1" / name, color)
+        self.store.root.mkdir()
+        (self.store.root / "card-backs.txt").write_text("C/set1 | front.jpg | back.jpg", encoding="utf-8")
+        output = str(self.root / "exports")
+        code, message = self.call("inventory", "--input", str(self.inputs), "--complete-set", "C/set1", "--output", output)
+        self.assertEqual(code, 0, message)
+        pair, single = self.store.latest("inventory")["notes"]
+        self.assertEqual([len(pair["image_ids"]), len(single["image_ids"])], [2, 1])
+
+        config_path = self.root / "config.json"
+        atomic_json(config_path, {"quota_file": self.config.quota_file})
+        model = "gemini/" + self.config.model
+        atomic_json(self.config.quota_file, {"schema": "fieldnotes-quota-1", "models": {model: {
+            "day": "2026-11-18", "attempts": 499, "next_start": 0, "exhausted": False}}})
+        clock = Clock()
+        clock.value = datetime(2026, 11, 19, 7, 58, tzinfo=timezone.utc).timestamp()
+        fake = FakeTransport([response(rich_document(n["image_ids"])) for n in (pair, single)])
+        args = ("--config", str(config_path), "transcribe", "--pending", "--set", "C/set1", "--output", output)
+        with patch("fieldnotes.cli.api_key", return_value="dummy"), patch("fieldnotes.cli.Gemini", return_value=fake), \
+             patch("fieldnotes.execution.Quota", side_effect=lambda config, sleep: Quota(config, clock.time, clock.sleep)):
+            code, message = self.call(*args)
+            self.assertEqual(code, 1, message)
+            self.assertIn("Model gemini-3.5-flash-lite", message)
+            self.assertIn("Daily limit 500 attempts", message)
+            self.assertIn("[1/2] Preparing scans from C/set1 (front.jpg, back.jpg)", message)
+            self.assertIn("Gemini request 1/3. Daily attempts 500/500", message)
+            self.assertIn("Updating saved reports", message)
+            self.assertIn("1/2 cards complete", message)
+            self.assertEqual(json.loads(message.splitlines()[-1])["attempts"], 1)
+            self.assertIn("500 of 500 attempts", message)
+            self.assertIn("--pending", message)
+            self.assertEqual(len(fake.calls), 1)
+            clock.value += 120  # Midnight in the configured Pacific time zone.
+            code, message = self.call(*args)
+            self.assertEqual(code, 0, message)
+
+        starts = [event["data"]["note_id"] for event in self.store.events() if event["kind"] == "attempt_start"]
+        self.assertEqual(starts, [pair["note_id"], single["note_id"]])
+        self.assertEqual(len(fake.calls), 2)
+
     def test_cli_checkpoint_then_export_failure_pending_no_second_request(self):
         self.setup_note(names=['C/a.jpg']);fake=FakeTransport([response(self.doc)])
         config=self.root/'config.json';atomic_json(config,{'quota_file':self.config.quota_file})
@@ -126,12 +245,14 @@ class PublicationTests(Workspace):
         export_all(self.store,self.inventory,self.output);self.destination=self.root/'published';self.destination.mkdir()
     def test_publication_explicit_owned_stable_names_and_discovery_exclusion(self):
         before=(self.inputs/'C/a.jpg').read_bytes()
-        count=publish(self.store,self.inventory,self.output,self.inputs);self.assertEqual(count,4)
+        self.assertEqual(publish(self.store, self.inventory, self.output, self.inputs), 2)
+        self.assertEqual(generated_paths(self.store, self.inputs),
+                         {"C/Unfiled_transcriptions.txt", "Field_notes_viewer.json"})
+        self.assertIn("C/a.jpg", (self.inputs / "C" / "Unfiled_transcriptions.txt").read_text(encoding="utf-8"))
         inv=discover(self.inputs,self.inventory,generated_paths=generated_paths(self.store,self.inputs))
         self.assertEqual(len(inv['images']),1);self.assertEqual((self.inputs/'C/a.jpg').read_bytes(),before)
-        self.assertTrue((self.inputs/'Field_notes'/f"{self.note['note_id']}.txt").is_file())
     def test_unowned_and_edited_outputs_never_overwritten(self):
-        p=self.destination/'Field_notes_transcriptions.txt';p.write_text('Staff text')
+        p=self.destination/'C'/'Unfiled_transcriptions.txt';p.parent.mkdir();p.write_text('Staff text')
         with self.assertRaisesRegex(ValueError,'Unowned'):publish(self.store,self.inventory,self.output,self.destination)
         self.assertEqual(p.read_text(),'Staff text');p.unlink()
         publish(self.store,self.inventory,self.output,self.destination);p.write_text('Staff edit')
@@ -139,11 +260,33 @@ class PublicationTests(Workspace):
         self.assertEqual(p.read_text(),'Staff edit')
     def test_superseded_owned_copy_archived(self):
         publish(self.store,self.inventory,self.output,self.destination)
-        old=(self.destination/'Field_notes_transcriptions.txt').read_bytes()
+        old=(self.destination/'C'/'Unfiled_transcriptions.txt').read_bytes()
         self.doc['pages'][0]['text']='New synthetic reading';self.save();export_all(self.store,self.inventory,self.output)
         publish(self.store,self.inventory,self.output,self.destination)
         archives=[e['data']['archived'] for e in self.store.events() if e['kind']=='publication' and e['data'].get('archived')]
         self.assertTrue(any((self.store.root/p).read_bytes()==old for a in archives for p in a.values()))
+    def test_obsolete_readers_are_archived_when_switching_to_set_readers(self):
+        folder = self.destination / "Field_notes"
+        folder.mkdir()
+        old_reader = folder / f"{self.note['note_id']}.txt"
+        contents = b"Previously published card reading"
+        old_reader.write_bytes(contents)
+        combined = self.destination / "Field_notes_transcriptions.txt"
+        combined.write_bytes(b"Previously published collection reading")
+        unrelated = folder / "staff.txt"
+        unrelated.write_bytes(b"Unmanaged staff note")
+        relative = old_reader.relative_to(self.destination).as_posix()
+        self.store.append("publication", {"destination": str(self.destination.resolve()), "status": "complete",
+                                           "files": {relative: [digest(contents)], combined.name: [digest(combined.read_bytes())]}})
+
+        publish(self.store, self.inventory, self.output, self.destination)
+
+        self.assertFalse(old_reader.exists())
+        self.assertFalse(combined.exists())
+        self.assertEqual(unrelated.read_bytes(), b"Unmanaged staff note")
+        pending = [e["data"] for e in self.store.events()
+                   if e["kind"] == "publication" and e["data"]["status"] == "pending"][-1]
+        self.assertEqual((self.store.root / pending["archived"][relative]).read_bytes(), contents)
     def test_interrupted_publication_resumes_from_ownership_journal(self):
         from fieldnotes.storage import atomic_bytes
         calls=[]
@@ -154,16 +297,31 @@ class PublicationTests(Workspace):
         with patch('fieldnotes.publication.atomic_bytes',side_effect=interrupted):
             with self.assertRaises(OSError):publish(self.store,self.inventory,self.output,self.destination)
         self.assertEqual(self.store.latest('publication')['status'],'pending')
-        self.assertEqual(publish(self.store,self.inventory,self.output,self.destination),4)
+        self.assertEqual(publish(self.store,self.inventory,self.output,self.destination),2)
     def test_normal_export_never_republishes(self):
         publish(self.store,self.inventory,self.output,self.destination)
         before={p.name:p.read_bytes() for p in self.destination.rglob('*') if p.is_file()}
         self.doc['pages'][0]['text']='Changed local';self.save();export_all(self.store,self.inventory,self.output)
         self.assertEqual(before,{p.name:p.read_bytes() for p in self.destination.rglob('*') if p.is_file()})
-    def test_same_display_labels_have_collision_free_outputs(self):
-        jpeg(self.inputs/'C/b.jpg','red');inv=discover(self.inputs,self.inventory);self.store.append('inventory',inv)
-        export_all(self.store,inv,self.output);publish(self.store,inv,self.output,self.destination)
-        self.assertEqual(len(list((self.destination/'Field_notes').glob('note_*.txt'))),2)
+    def test_cli_publishes_separate_set_readers_under_each_collector(self):
+        sets = {"Carriker/set1": ["a.jpg", "b.jpg"], "Carriker/set2": ["a.jpg"], "Other/set1": ["a.jpg"]}
+        for index, scan in enumerate(f"{folder}/{name}" for folder, names in sets.items() for name in names):
+            jpeg(self.inputs / scan, (25 * index, 65, 100))
+        inv = discover(self.inputs, self.inventory, complete_sets=sets)
+        self.store.append("inventory", inv)
+        status = main(["--store", str(self.store.root), "publish", "--output", str(self.output),
+                       "--destination", str(self.destination)])
+        self.assertEqual(status, 0)
+        readers = {p.relative_to(self.destination).as_posix(): p.read_text(encoding="utf-8")
+                   for p in self.destination.rglob("*.txt")}
+        self.assertEqual(set(readers), {folder + ".txt" for folder in sets} | {"C/Unfiled_transcriptions.txt"})
+        all_scans = {f"{folder}/{name}" for folder, names in sets.items() for name in names}
+        for folder, names in sets.items():
+            text = readers[folder + ".txt"]
+            self.assertEqual({path for path in all_scans if path in text},
+                             {f"{folder}/{name}" for name in names})
+        bundle = json.loads((self.destination / "Field_notes_viewer.json").read_text(encoding="utf-8"))
+        self.assertEqual({s["path"] for n in bundle["notes"] for s in n["scans"]}, all_scans | {"C/a.jpg"})
 
 
 class UsageTests(Workspace):

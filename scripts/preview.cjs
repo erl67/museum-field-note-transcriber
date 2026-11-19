@@ -56,8 +56,11 @@ function referenceCalls(api) {
 }
 
 function renderPage(template, url, reference) {
-  const values = { ...Object.fromEntries(url.searchParams), noteId: url.searchParams.get('note'), letterId: url.searchParams.get('letter'),
-    appUrl: reference ? '/reference' : '/', error: '' };
+  const values = { ...Object.fromEntries(url.searchParams), noteId: url.searchParams.get('note'), letterId: url.searchParams.get('letter'), scanSet: url.searchParams.get('set'),
+      number: url.searchParams.get('number') || (/^\?[0-9]+$/.test(url.search) ? url.search.slice(1) : ''),
+      query: url.searchParams.get('number') || url.searchParams.get('query') || url.searchParams.get('q') ||
+        (/^\?[0-9]+$/.test(url.search) ? url.search.slice(1) : ''),
+      appUrl: reference ? '/reference' : '/', error: '' };
   const bridge = `<meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
 function runner(success, failure) {

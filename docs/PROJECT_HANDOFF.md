@@ -1,10 +1,24 @@
-# Project handoff · November 17, 2026
+# Project handoff · November 18, 2026
 
 The first field-note application is usable locally. Staff can inventory original JPEGs, inspect a read-only dry run, transcribe a selected batch when authorized, review the resulting pages and metadata, and regenerate a catalogue, reading files and Drive viewer bundle offline. An explicit publication operation manages its own outputs. This implementation used no live transcription, Drive publication, sharing change or deployment.
 
-## Current local collection
+## November 18 scanning and viewer update
 
-The latest saved inventory contains **122 Carriker JPEGs and 122 active provisional notes**, all ready for preparation and all unprocessed. The source grew from the initial 19, through 21 during early inspection, to 122 at the resumed check. These are dated observations, not expected counts in reusable tests. The catalogue includes every note without guessing any species or number.
+The two completed Carriker sets contain **576 JPEGs and 462 cards**. Set 1 has 364 scans covering 348 single-sided and eight two-sided cards. Set 2 has 212 scans covering 106 front/back pairs. The offline dry run prepared all 462 cards. The local catalogue, viewer bundle and reports agree on the page order, and all cards await transcription.
+
+The partial set 2 intake was withdrawn before the completed set was inventoried. The completed set 2 has the 12:48:30 front followed by its 12:48:38 back. The earlier draft at 12:48:15 is absent. Source hashes and note IDs for set 1 match its preceding inventory. The journal retains the earlier inventory events. Future sets can stay in their scan folders until the operator uses `--complete-set` to admit the finished pile.
+
+Use `show --set Carriker/set1` or the viewer's scan-set selector to browse that pile. The private scanner log identifies the set 1 fronts and configures `Carriker/set2` for alternating sides. The viewer can find individual members of written catalogue ranges. The [scanning instructions](../README.md#scan-a-pile-of-cards) cover the folder conventions.
+
+The default daily allocation is 500 attempts for `gemini-3.5-flash-lite`, as specified by the operator. The example configuration uses the same limit. Requests are paced at one per minute, and retries and format corrections each count toward the daily total.
+
+Transcription batches now sort by collector/set and the first page's scan filename. Scanner filenames supply chronological order within each set; natural sorting keeps `set2` before `set10`. This fixes the inventory's explicit-groups-first order leaking into the execution queue. Saved page order, inventory and completed results remain intact. The CLI announces the queue order, and the change takes effect on the next start without re-inventorying.
+
+The current correspondence stylesheet and the field-note viewer's reference and embedded copies match with SHA-256 `82ddc4e76fa105bad5668707e73d20d5e33448771567c9b0197aa58185be4804`. Both templates rendered the same scan and text panel geometry at 1365 and 390 CSS pixels. The updated viewer and exports are local.
+
+## November 17 inventory
+
+The November 17 inventory contained **122 Carriker JPEGs and 122 active provisional notes**, all ready for preparation and all unprocessed. The source grew from the initial 19, through 21 during early inspection, to 122 at the resumed check. These are dated observations, not expected counts in reusable tests. The catalogue includes every note without guessing any species or number.
 
 - The snapshot spans `IMG_2026_11_17_12_02_18S.jpg` through `IMG_2026_11_17_15_58_39S.jpg`. Original bytes total 100,785,780. Widths range from 2606 to 2648 pixels and heights from 2080 to 2251. The first three scans measured 2648 × 2080, 2624 × 2104 and 2639 × 2106. The inventory reported no duplicate-name/content or image-read warnings.
 - The default dry run prepared every whole note at original quality. The mounted integration test independently checked JPEG format, dimensions and hashes, compared representative submitted bytes with originals, and rehashed the sources. The real store's only event at handoff was its inventory. It contains no service response, reviewed reading or paid attempt.
@@ -26,7 +40,7 @@ These observations motivated test cases. They are initial visual impressions and
 
 | Files | Responsibility and origin |
 | --- | --- |
-| `fieldnotes/discovery.py`, `paths.py` | New field-note inventory, single-card default, explicit ordered grouping, retained records and hash-verified path reconciliation. |
+| `fieldnotes/discovery.py`, `card_backs.py`, `paths.py` | Field-note inventory, scanner-log pairs, manual ordered grouping, retained records and hash-verified path reconciliation. |
 | `prompt.py`, `schema.py` | New whole-note reading policy and v1 schema with page/entry evidence, identifiers, taxa, source uncertainty and date precision. |
 | `catalogue.py`, `review.py`, `profiles.py` | Conservative searchable projections, append-only revision-bound corrections, approved aliases and explicitly selected versioned handwriting context. Profile limits and immutability adapt the correspondence mechanism. |
 | `config.py`, `provider.py`, `execution.py`, `usage.py`, `storage.py` | Adapted small modules from the local correspondence checkout. They handle effective settings, SDK transport, one retry loop, shared-field-note quota locking, raw blobs, accounting, durable checkpointing, cache selection and recovery. Field notes have their own journal guard and quota format. No historical prices or counters were brought over. |
@@ -37,13 +51,15 @@ These observations motivated test cases. They are initial visual impressions and
 
 Initial reference inspection used correspondence commit `0609a72`. During the interruption the reference advanced through `6c44177` to local HEAD `53899c9`. Its latest HTML and server changes were inspected and the updated stylesheet, simple row presentation, processing-activity ordering, divider and page counts were incorporated. Field-note-specific number/species browsing and opening Carriker by name remain in place. Correspondence-specific name redirects, letter grouping rules and its optional alternate-model recipe were not imported. The new app reports stopped batches and the retained error to staff. The reference checkout was read-only throughout, including its pre-existing unpushed commit.
 
-The extracted first CSS block and the embedded copy have SHA-256 `47bbfecd8f0f1793e7407c96322992814fb56c17e0dad82373c7eb011a4e2ee2` with LF line endings. The separate control styles are listed in the viewer README. The verified [repository remote](https://github.com/erl67/museum-field-note-transcriber) is used for the footer. All runtime defaults remain local and restricted.
+The separate field-note control styles are listed in the viewer README. The verified [repository remote](https://github.com/erl67/museum-field-note-transcriber) is used for the footer. All runtime defaults remain local and restricted.
 
 ## Verification and remaining work
 
-**110 Python tests and 36 Node viewer tests passed**, with zero failures or skips, including the mounted Carriker check and actual Python-export-to-Apps-Script round trip. The reference baseline initially passed 122 Python and 55 viewer tests. Its updated checkout passed **131 Python and 58 viewer tests**, also with zero failures or skips. Reference test scratch files were redirected to this project's ignored local workspace.
+After the CLI ordering change, the offline suite ran 122 Python tests successfully (one optional mounted-source test skipped) and all 40 Node viewer tests passed. The new synthetic batch checks mixed single cards and pairs, chronological filenames, natural collector/set and fallback filename order, exact page order, and skipping completed cards on resumption. A read-only check of the saved inventory places the first Carriker scan at `set1/IMG_2026_11_17_12_02_18S.jpg`, followed by the remaining set 1 cards and then set 2. No service requests or collection writes were made for this change.
 
-Local Edge rendered both actual templates with identical invented scan inputs at 1365 × 950 and 390 × 844. The common computed styles and the scan/text panel geometry matched. For the 900 × 570 invented scan, the desktop sheet measured 630.5 × 399.3 CSS pixels and the mobile sheet 358 × 226.7. The second, portrait scan kept its own proportions. Enlargement, keyboard dismissal, return navigation, collector/species filtering, Search and Show all passed. Screenshots and measurements are under `local/visual-check/`. The physical phones, live Apps Script frame and real Drive authentication were outside the offline check.
+On November 18, **118 Python tests and 40 Node viewer tests passed**, including the mounted set 2 check, isolation of unfinished piles, range lookup, alternating scan pairs and the Python-export-to-Apps-Script round trip. A synthetic batch starting at 499 of 500 daily attempts sent both sides of one card together, stopped at the cap, and resumed the remaining card at midnight Pacific. The November 17 field-note baseline passed 110 Python and 36 Node tests. On November 17 the correspondence checkout passed 131 Python and 58 viewer tests.
+
+Local Edge rendered both current templates with identical invented scans at 1365 × 950 and 390 × 844. With a long source line, the desktop scan and text columns measured 592.7 and 668.3 CSS pixels. Mobile stacked the pages and preserved each image's proportions. Enlargement, keyboard dismissal, return navigation, collector/species filtering, Search and Show all passed. Screenshots and measurements are under `local/visual-check/`. The physical phones, live Apps Script frame and real Drive authentication were outside the offline check.
 
 Staff still need to authorize a service run, provide their key and account allocation, and review the historical readings. Real handwriting accuracy, actual billed usage and live model availability are unmeasured. The optional viewer requires real Drive file/folder IDs, access decisions and a deployment. The current implementation reads the local JSONL history and a bounded Drive bundle in full. Large collections may eventually need smaller viewer exports. Select a whole note or group within configured input limits. Preserve private backups of the journal and blobs before moving a store.
 

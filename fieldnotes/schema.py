@@ -98,10 +98,11 @@ def validate_document(document, image_ids, hints=None):
         if page.get("status") not in {"text", "blank", "unrelated", "illegible", "cropped"}:
             errors.append("Invalid page status")
         texts[iid] = text
-        for note in annotations:
+        for index, note in enumerate(annotations):
             if (not isinstance(note, dict) or not isinstance(note.get("text"), str)
                     or note.get("kind") not in {"marginal", "later", "signature", "pagination", "mark", "unknown"}):
-                errors.append("Annotation needs kind and faithful text")
+                errors.append(f"Page {iid} annotations[{index}] needs a text string and kind "
+                              "marginal|later|signature|pagination|mark|unknown")
             else:
                 texts[iid] += "\n" + note["text"]
         if page.get("status") in {"unrelated", "illegible", "cropped"}:
@@ -132,8 +133,11 @@ def validate_document(document, image_ids, hints=None):
             eid = item.get("entry_id") or entry_id
             if entry_id and eid != entry_id:
                 errors.append(f"{label}: evidence belongs to a different entry")
-            if eid and (eid not in entry_map or entry_map[eid]["image_id"] != item["image_id"]):
-                errors.append(f"{label}: evidence references nonexistent or different-page entry")
+            if eid and eid not in entry_map:
+                errors.append(f"{label}: evidence entry_id {eid!r} must reference an existing entry")
+            elif eid and entry_map[eid]["image_id"] != item["image_id"]:
+                errors.append(f"{label}: evidence image {item['image_id']} differs from entry {eid!r}'s "
+                              f"image {entry_map[eid]['image_id']}. Give each page its own entry_id.")
             if item.get("quote") and item["quote"] not in texts[item["image_id"]]:
                 reasons.append(f"{label}: evidence quotation not found verbatim")
 
@@ -147,7 +151,8 @@ def validate_document(document, image_ids, hints=None):
             errors.append(f"{label}: invalid certainty")
         eid = value.get("entry_id")
         if linked and ("entry_id" not in value or (eid is not None and eid not in entry_map)):
-            errors.append(f"{label}: entry_id must reference a section or be null")
+            errors.append(f"{label}: include an entry_id key referencing an existing section or null, "
+                          "in addition to entry_id inside evidence")
         evidence(value.get("evidence"), label, eid)
         if value.get("value") or value.get("normalized"):
             if not value.get("evidence"):
@@ -204,7 +209,7 @@ def validate_document(document, image_ids, hints=None):
     if not isinstance(document.get("summary"), str):
         errors.append("summary must be a separate string")
     if not isinstance(document.get("notes"), list) or any(not isinstance(n, str) for n in document.get("notes", [])):
-        errors.append("notes must be strings")
+        errors.append('notes must be an array of plain strings, for example ["An explanatory note."]')
     translations = document.get("translations")
     if not isinstance(translations, list):
         errors.append("translations must be an array")

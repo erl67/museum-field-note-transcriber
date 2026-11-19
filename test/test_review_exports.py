@@ -7,7 +7,8 @@ import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from fieldnotes.catalogue import browse, number_key
+from fieldnotes.catalogue import browse, matches_number, number_key
+from fieldnotes.cli import parser, select
 from fieldnotes.discovery import discover, regroup, reconcile_paths
 from fieldnotes.exports import export_all, cell
 from fieldnotes.images import prepare_request
@@ -21,6 +22,21 @@ class ReviewTests(Workspace):
     def setUp(self):
         super().setUp();self.setup_note(names=['Carriker/one.jpg']);self.result=self.save(rich_document(self.note['image_ids']))
     def current(self): return current_records(self.store,self.inventory)[0]
+    def test_range_lookup_through_catalogue_and_transcription_selection(self):
+        cases = json.loads((Path(__file__).parent / "inputs/catalogue-ranges.json").read_text(encoding="utf-8"))
+        for raw, yes, no in cases:
+            for query in yes + no:
+                with self.subTest(raw=raw, query=query):
+                    self.assertEqual(matches_number([raw], query), query in yes)
+        self.review(identifiers=[field("8419-20", self.note["image_ids"][0], entry_id="north",
+                                      number_type="collection", namespace="Example")])
+        record = self.current()
+        self.assertEqual(record["catalogue"]["numbers"], ["8419-20"])
+        self.assertEqual(browse([record], query="8420")["order"], [record["note_id"]])
+        args = parser().parse_args(["transcribe", "--number", "8420"])
+        self.assertEqual(select([record], args), [record])
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            select([record, dict(record, note_id="another")], args)
     def review(self,**changes):
         r=self.current()
         return apply_review(self.store,self.inventory,dict(note_id=r['note_id'],base_revision=r['result']['revision_id'],base_review=r['review_basis'],source='Synthetic review',**changes))

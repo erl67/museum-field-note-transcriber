@@ -64,6 +64,8 @@ def current_records(store, inventory):
                 record["review_reasons"] += result.get("review_reasons", [])
             if stale:
                 record["review_reasons"].append("Source content/order changed; earlier reading retained with its original evidence")
+        if (note.get("override") or {}).get("kind") == "awaiting_back":
+            record["execution"] = "blocked"
         # A process killed without a checkpoint stays visible, not silently pending.
         if note["note_id"] in preflight:
             if not result:
@@ -99,7 +101,8 @@ def current_records(store, inventory):
             record["review_reasons"] += reasons
         record["review_reasons"] = sorted(set(record["review_reasons"]))
         record["review_basis"] = review_basis(record)
-        record["catalogue"] = project(record, registry)
+        folders = dict.fromkeys(images[iid]["folder"] for iid in note["image_ids"])
+        record["catalogue"] = project(record, registry, [folder for folder in folders if "/" in folder])
         record["review_reasons"] += record["catalogue"]["conflicts"]
         records.append(record)
     return records

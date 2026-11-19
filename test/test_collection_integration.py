@@ -7,6 +7,7 @@ from PIL import Image
 from fieldnotes.config import Config
 from fieldnotes.discovery import discover
 from fieldnotes.images import prepare_request
+from fieldnotes.paths import inside
 
 
 class CarrikerIntegration(unittest.TestCase):
@@ -15,12 +16,16 @@ class CarrikerIntegration(unittest.TestCase):
         if not configured:
             self.skipTest("Set FIELDNOTES_TEST_ROOT to opt into the mounted Carriker check")
         root = Path(configured)
-        if not (root / "Carriker").is_dir():
-            self.skipTest("Carriker source folder is unavailable on this machine")
-        paths = sorted(p for p in (root / "Carriker").rglob("*") if p.suffix.lower() in {".jpg", ".jpeg"})
-        self.assertTrue(paths, "Accessible Carriker folder has no JPEGs")
+        name = os.environ.get("FIELDNOTES_TEST_SET")
+        if not name:
+            self.skipTest("Set FIELDNOTES_TEST_SET to the exact completed set to check")
+        folder = inside(root, name)
+        if not folder.is_dir():
+            self.skipTest("Completed source folder is unavailable on this machine")
+        paths = sorted(p for p in folder.iterdir() if p.suffix.lower() in {".jpg", ".jpeg"})
+        self.assertTrue(paths, "The selected completed set has no JPEGs")
         originals = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
-        inventory = discover(root)
+        inventory = discover(root, complete_sets=[name])
         by_path = {i["path"]: i for i in inventory["images"] if i["path"] in originals}
         self.assertEqual(set(originals), set(by_path))
         for relative, scan in by_path.items():

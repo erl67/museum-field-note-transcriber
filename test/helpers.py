@@ -89,10 +89,10 @@ class Workspace(unittest.TestCase):
         self.root = Path(self.temp.name); self.inputs = self.root / "inputs"; self.inputs.mkdir()
         self.store = Store(self.root / "store")
         self.config = replace(Config(), quota_file=str(self.root / "quota.json"))
-    def setup_note(self, names=("Carriker/sample1.jpg", "Carriker/sample2.jpg")):
+    def setup_note(self, names=("Carriker/sample1.jpg", "Carriker/sample2.jpg"), *, complete_sets=()):
         for index, name in enumerate(names):
             jpeg(self.inputs / name, (index * 50, 100, 150))
-        self.inventory = discover(self.inputs)
+        self.inventory = discover(self.inputs, complete_sets=complete_sets)
         if len(names) > 1:
             self.inventory = regroup(self.inventory, dict(version=1, groups=[dict(key="synthetic", paths=list(names), source="Synthetic explicit grouping")]))
         self.store.append("inventory", self.inventory)

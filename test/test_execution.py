@@ -1,8 +1,10 @@
 # Adapted from museum-correspondence 0609a72; synthetic/offline only.
+from contextlib import chdir
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 import httpx
@@ -10,7 +12,7 @@ from fieldnotes.execution import Quota, QuotaReached, error_policy, transcribe
 from fieldnotes.exports import export_all
 from fieldnotes.provider import Gemini, api_key
 from fieldnotes.storage import atomic_json, encoded, lock, read_json
-from .helpers import Workspace, Clock, FakeTransport, ServiceError, response
+from .helpers import Workspace, Clock, FakeTransport, ServiceError, response, rich_document
 
 
 class ExecutionTests(Workspace):
@@ -41,13 +43,30 @@ class ExecutionTests(Workspace):
             self.assertTrue((self.store.root / "blobs" / (image["submitted_sha256"] + ".jpg")).is_file())
 
     def test_service_retries_all_counted_and_paced(self):
-        result, _, fake = self.execute([ServiceError(503), response(self.doc)])
+        messages = []
+        fake = FakeTransport([ServiceError(503), response(self.doc)])
+        send = fake.send
+
+        def send_after_progress(request, prompt):
+            self.assertIn(f"Gemini request {len(fake.calls) + 1}/3", messages[-1])
+            self.assertIn(f"Daily attempts {len(fake.calls) + 1}/500", messages[-1])
+            return send(request, prompt)
+
+        def wait_after_progress(duration):
+            self.assertIn("Retrying in" if not self.clock.waits else "Request pacing", messages[-1])
+            self.clock.sleep(duration)
+
+        self.quota.sleep = wait_after_progress
+        with patch.object(fake, "send", side_effect=send_after_progress):
+            result, _ = transcribe(self.store, self.note, self.request, self.config, lambda: fake,
+                                   quota=self.quota, sleep=wait_after_progress, progress=messages.append)
         self.assertEqual(result["execution"], "complete")
         self.assertEqual(len(fake.calls), 2)
         self.assertEqual(read_json(self.config.quota_file)["models"]["gemini/" + self.config.model]["attempts"], 2)
         ends = [e["data"] for e in self.store.events() if e["kind"] == "attempt_end"]
         self.assertIsNone(ends[0]["usage"]["total"])
         self.assertGreater(sum(self.clock.waits), 29)
+        self.assertTrue(any("Gemini responded" in message and "160 tokens" in message for message in messages))
 
     def test_format_correction_bounded_and_preserves_all_responses(self):
         bad = response(self.doc)
@@ -58,6 +77,33 @@ class ExecutionTests(Workspace):
         self.assertEqual(result["text"], "substantive malformed reading")
         self.assertIn("FORMAT CORRECTION", fake.calls[1])
         self.assertEqual(len([e for e in self.store.events() if e["kind"] == "attempt_end"]), 2)
+
+    def test_annotation_notes_and_cross_page_errors_get_specific_correction_instructions(self):
+        doc = rich_document(self.note["image_ids"])
+        front, back = self.note["image_ids"]
+        doc["pages"][0]["annotations"] = [{"kind": "marginal", "value": "Example margin"}]
+        doc["notes"] = [{"value": "Example explanation"}]
+        doc["observations"][0].update(entry_id="north", evidence=[
+            {"image_id": back, "entry_id": "north", "quote": "South slope."}])
+        invalid = response(doc)
+
+        corrected = deepcopy(doc)
+        corrected["pages"][0]["annotations"] = [{"kind": "marginal", "text": "Example margin"}]
+        corrected["notes"] = ["Example explanation"]
+        corrected["entries"].append({"entry_id": "reverse", "image_id": back, "label": "Reverse passage",
+                                     "evidence": [{"image_id": back, "quote": "South slope."}]})
+        corrected["observations"][0].update(entry_id="reverse", evidence=[
+            {"image_id": back, "entry_id": "reverse", "quote": "South slope."}])
+        result, _, fake = self.execute([invalid, response(corrected)])
+
+        self.assertEqual(result["execution"], "complete")
+        self.assertEqual(len(fake.calls), 2)
+        self.assertIn(f"Page {front} annotations[0] needs a text string", fake.calls[1])
+        self.assertIn("notes must be an array of plain strings", fake.calls[1])
+        self.assertIn("Give each page its own entry_id", fake.calls[1])
+        ends = [e["data"] for e in self.store.events() if e["kind"] == "attempt_end"]
+        self.assertEqual(read_json(self.store.root / ends[0]["response"]), invalid)
+        self.assertEqual(result["document"]["pages"][0]["text"], doc["pages"][0]["text"])
 
     def test_honest_uncertainty_no_extra_attempt(self):
         self.doc["pages"][0]["text"] += " [uncertain: 0012]"
@@ -306,3 +352,13 @@ except RuntimeError:
             api_key(path)
         path.write_text("GEMINI_API_KEY=dummy\n")
         self.assertEqual(api_key(path), "dummy")
+
+    def test_credentials_default_to_current_dotenv(self):
+        (self.root / ".env").write_text('GEMINI_API_KEY="dummy-file-key"\n', encoding="utf-8-sig")
+        alternate = self.root / "alternate.env"
+        alternate.write_text("GOOGLE_API_KEY=dummy-alternate-key\n", encoding="utf-8")
+        with chdir(self.root), patch.dict(os.environ, clear=True):
+            self.assertEqual(api_key(), "dummy-file-key")
+            os.environ["GEMINI_API_KEY"] = "dummy-env-key"
+            self.assertEqual(api_key(), "dummy-env-key")
+            self.assertEqual(api_key(alternate), "dummy-alternate-key")

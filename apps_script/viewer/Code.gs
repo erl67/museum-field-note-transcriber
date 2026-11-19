@@ -82,15 +82,22 @@ function field_(value) {
   return { ...scalars_(value, ['value', 'normalized', 'certainty', 'entry_id', 'number_type', 'namespace', 'role', 'name_type', 'rank', 'source_uncertain', 'alternative_group', 'precision', 'event', 'kind']),
     evidence: (value.evidence || []).map(e => scalars_(e, ['image_id', 'entry_id', 'quote', 'location'])) };
 }
-function catalogue_(cat) {
+function scanSets_(note) {
+  if (Array.isArray(note.catalogue.scan_sets)) return strings_(note.catalogue.scan_sets);
+  // Older bundles already contain each scan's root-relative path.
+  const folders = note.scans.map(scan => scan.path.split('/').slice(0, -1).join('/'));
+  return [...new Set(folders.filter(folder => folder.includes('/')))];
+}
+function catalogue_(note) {
+  const cat = note.catalogue;
   return { ...scalars_(cat, ['collector', 'collector_folder', 'collector_basis', 'species', 'number_label', 'title']),
-    numbers: strings_(cat.numbers), aliases: strings_(cat.aliases),
+    scan_sets: scanSets_(note), numbers: strings_(cat.numbers), aliases: strings_(cat.aliases),
     species_groups: (cat.species_groups || []).map(g => scalars_(g, ['key', 'name', 'rank', 'uncertain', 'role', 'as_written'])) };
 }
 function publicNote_(note) {
   const result = scalars_(note, ['note_id', 'active', 'execution', 'discovery', 'grouping', 'metadata_review', 'transcription_review', 'summary']);
   result.hints = { collector_folder: note.hints.collector_folder, filenames: strings_(note.hints.filenames) };
-  result.catalogue = catalogue_(note.catalogue);
+  result.catalogue = catalogue_(note);
   result.metadata = {};
   for (const key of ['collector', 'language', 'document_type', 'physical_hand']) if (note.metadata[key]) result.metadata[key] = field_(note.metadata[key]);
   for (const key of ['identifiers', 'taxa', 'localities', 'dates', 'observations']) result[key] = (note[key] || []).map(field_);
@@ -98,15 +105,17 @@ function publicNote_(note) {
   result.pages = note.pages.map(p => ({ ...scalars_(p, ['image_id', 'status', 'text']), annotations: (p.annotations || []).map(a => scalars_(a, ['kind', 'text'])) }));
   result.notes = strings_(note.notes);
   result.translations = (note.translations || []).map(t => scalars_(t, ['image_id', 'language', 'text']));
-  result.scans = note.scans.map(s => ({ ...scalars_(s, ['image_id', 'path', 'filename', 'folder', 'status', 'order']),
+  result.scans = note.scans.map(s => ({ ...scalars_(s, ['image_id', 'path', 'filename', 'folder', 'status', 'order', 'side']),
     mapping_status: s.drive_file_id ? 'mapped' : SETTINGS.SCAN_ROOT_FOLDER_ID ? 'folder_lookup' : 'missing_mapping' }));
   return result;
 }
 function context_(input) {
   input = input || {};
-  const result = { query: String(input.query || '').trim(), mode: String(input.mode || 'collector'), collector: String(input.collector || ''),
-    group: String(input.group || ''), sort: String(input.sort || 'number') };
-  if (result.query.length > 200 || result.collector.length > 500 || result.group.length > 2000 ||
+  const number = String(input.number || '').trim();
+  if (number && !/^[0-9]{1,200}$/.test(number)) throw new Error('Invalid catalogue number.');
+  const result = { number, query: number || String(input.query || '').trim(), mode: String(input.mode || 'collector'), collector: String(input.collector || ''),
+    set: String(input.set || ''), group: String(input.group || ''), sort: String(input.sort || 'number') };
+  if (result.query.length > 200 || result.collector.length > 500 || result.set.length > 4096 || result.group.length > 2000 ||
       !['collector', 'species'].includes(result.mode) || !['number', 'species'].includes(result.sort)) throw new Error('Invalid browse/search options.');
   return result;
 }
@@ -115,9 +124,38 @@ function searchText_(source) {
   const n = publicNote_(source);
   return JSON.stringify(n).toLocaleLowerCase();
 }
+function numberMatches_(values, query) {
+  const hits = [];
+  if (!/^[0-9]+$/.test(query)) return hits;
+  const atMost = (a, b) => a.length < b.length || (a.length === b.length && a <= b);
+  for (const value of strings_(values)) {
+    let label = value.trim();
+    if (label.startsWith('(') && label.endsWith(')')) label = label.slice(1, -1);
+    const parts = label.split(/;|,(?![0-9]{3}\b)|(?<=[0-9]{4}),/);
+    for (const part of parts) {
+      const match = /^\s*([0-9]+)(?:[ \t]*[-–—−][ \t]*([0-9]+))?\s*$/.exec(part);
+      if (!match) continue;
+      const [, first, shortEnd] = match;
+      if (!shortEnd) {
+        if (query === first) hits.push({ value, token: first });
+        continue;
+      }
+      const end = first.slice(0, Math.max(0, first.length - shortEnd.length)) + shortEnd;
+      if (/^0[0-9]/.test(first)) {
+        if (query.length !== first.length || end.length !== first.length) continue;
+      } else if (/^0[0-9]/.test(query) || /^0[0-9]/.test(end)) continue;
+      // Length then lexical order keeps arbitrary-width decimal identifiers exact.
+      if (atMost(first, query) && atMost(query, end)) hits.push({ value, token: first + '-' + shortEnd });
+    }
+  }
+  return hits;
+}
 function matches_(notes, context) {
+  const numeric = /^[0-9]+$/.test(context.query);
   return notes.filter(n => n.active !== false && (!context.collector || [n.catalogue.collector, n.catalogue.collector_folder].includes(context.collector)) &&
-    (!context.query || searchText_(n).includes(context.query.toLocaleLowerCase()))).sort((a, b) =>
+    (!context.set || scanSets_(n).includes(context.set)) &&
+    (!context.query || (numeric && numberMatches_(n.catalogue.numbers, context.query).length > 0) ||
+      (!context.number && searchText_(n).includes(context.query.toLocaleLowerCase())))).sort((a, b) =>
       (context.sort === 'species' ? a.catalogue.species.localeCompare(b.catalogue.species) : 0) || a.number_order - b.number_order || a.note_id.localeCompare(b.note_id));
 }
 function memberships_(note, mode) {
@@ -125,7 +163,7 @@ function memberships_(note, mode) {
 }
 function row_(note) {
   const snippet = Array.from((note.summary || '').replace(/\s+/g, ' ').trim());
-  return { note_id: note.note_id, catalogue: catalogue_(note.catalogue), page_count: note.scans.length,
+  return { note_id: note.note_id, catalogue: catalogue_(note), page_count: note.scans.length,
     execution: note.execution, metadata_review: note.metadata_review, transcription_review: note.transcription_review,
     summary_snippet: snippet.length <= 360 ? snippet.join('') : snippet.slice(0, 359).join('') + '…' };
 }
@@ -149,7 +187,9 @@ function listFolders(input) {
     folders.sort((a, b) => (activity.get(b.key) || 0) - (activity.get(a.key) || 0));
     if (folders.length && activity.has(folders[0].key)) folders[0].is_latest = true;
   }
-  return { total: matches.length, context, collectors: [...new Set(active.map(n => n.catalogue.collector_folder))].sort(), folders };
+  const inCollector = active.filter(n => !context.collector || [n.catalogue.collector, n.catalogue.collector_folder].includes(context.collector));
+  return { total: matches.length, context, collectors: [...new Set(active.map(n => n.catalogue.collector_folder))].sort(),
+    sets: [...new Set(inCollector.flatMap(scanSets_))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), folders };
 }
 function selectNote_(value, id) {
   if (!validId_(id, 'note')) throw new Error('Invalid note ID.');
@@ -162,9 +202,10 @@ function loadNote(id, input) {
   let siblings = matches_(value.notes, context);
   if (context.group) siblings = siblings.filter(n => memberships_(n, context.mode).some(g => g.key === context.group));
   const index = siblings.findIndex(n => n.note_id === id);
-  const display = SETTINGS.PUBLIC_MODE ? publicNote_(note) : { ...note, scans: note.scans.map(s => ({ ...s,
+  const display = SETTINGS.PUBLIC_MODE ? publicNote_(note) : { ...note, catalogue: { ...note.catalogue, scan_sets: scanSets_(note) }, scans: note.scans.map(s => ({ ...s,
     mapping_status: s.drive_file_id ? 'mapped' : SETTINGS.SCAN_ROOT_FOLDER_ID ? 'folder_lookup' : 'missing_mapping' })) };
   return { note: display, token, context, publicMode: SETTINGS.PUBLIC_MODE,
+    numberMatches: numberMatches_(display.catalogue.numbers, context.query),
     navigation: { position: index + 1, total: siblings.length, group: context.group,
       previous: index > 0 ? row_(siblings[index - 1]) : null,
       next: index >= 0 && index + 1 < siblings.length ? row_(siblings[index + 1]) : null } };
@@ -172,11 +213,14 @@ function loadNote(id, input) {
 function doGet(e) {
   const p = (e && e.parameter) || {}, page = HtmlService.createTemplateFromFile('Viewer');
   page.noteId = String(p.note || '').slice(0, 100);
-  page.query = String(p.query || p.q || '').slice(0, 200); page.mode = String(p.mode || 'collector').slice(0, 20);
+  page.number = String(p.number || (/^[0-9]+$/.test(e && e.queryString) ? e.queryString : ''));
+  page.query = String(page.number || p.query || p.q || '').slice(0, 200);
+  page.mode = String(p.mode || 'collector').slice(0, 20);
   page.collector = String(p.collector || '').slice(0, 500); page.group = String(p.group || '').slice(0, 2000);
+  page.scanSet = String(p.set || '').slice(0, 4096);
   page.sort = String(p.sort || 'number').slice(0, 20); page.appUrl = ScriptApp.getService().getUrl(); page.error = '';
   try { gate_(); } catch (error) { page.error = error.message; }
-  return page.evaluate().setTitle('Museum field notes').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  return page.evaluate().setTitle('Museum field note transcriptions').addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 function publicBudget_(imageRequest) {

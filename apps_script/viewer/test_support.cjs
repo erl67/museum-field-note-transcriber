@@ -71,18 +71,21 @@ class Element {
   addEventListener(n, fn) { this.events[n] = fn; }
   setAttribute(n, v) { this.attributes[n] = v; }
   showModal() { this.open = true; }
+  focus() { this.focused = true; }
+  select() { this.selected = true; }
   close() { this.open = false; }
   remove() { this.removed = true; }
 }
 function frontend(dataset = {}, saved = {}) {
-  const ids = Object.fromEntries(['record','message','results','initial-error','query','search','catalogue','clear-search','browse-title','browse-intro','browse-mode','collector-filter','sort-order'].map(id => [id,new Element(id)]));
+  const ids = Object.fromEntries(['record','message','results','initial-error','query','search','catalogue','clear-search','browse-title','browse-intro','browse-mode','collector-filter','set-label','set-filter','sort-order'].map(id => [id,new Element(id)]));
   const body = new Element('body'); body.dataset = { url: 'https://script.google.com/synthetic/exec', ...dataset };
   const calls = [], catalogueCalls = [], noteCalls = [];
   const runner = { withSuccessHandler(fn) { this.success = fn; return this; }, withFailureHandler(fn) { this.failure = fn; return this; },
     loadImage(req) { calls.push({ req, success: this.success, failure: this.failure }); },
     listFolders(context) { catalogueCalls.push({ context, success: this.success, failure: this.failure }); },
     loadNote(id, context) { noteCalls.push({ id, context, success: this.success, failure: this.failure }); } };
-  const sandbox = { document: { body, getElementById: id => ids[id], createElement: tag => new Element(tag) },
+  const sandbox = { document: { body, getElementById: id => ids[id], createElement: tag => new Element(tag),
+    createTextNode: text => Object.assign(new Element('#text'), { textContent: text }) },
     google: { script: { run: runner } }, sessionStorage: { getItem: k => saved[k], setItem: (k, v) => { saved[k] = v; } } };
   vm.createContext(sandbox); vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], sandbox);
   return { sandbox, ids, calls, catalogueCalls, noteCalls, saved };

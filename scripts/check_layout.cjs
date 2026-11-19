@@ -32,7 +32,7 @@ async function check(browser, size) {
   await Promise.all([notes.goto(origin), letters.goto(origin + '/reference')]);
   for (const page of [notes, letters]) await page.locator('.folder[open] tbody a').first().waitFor();
   assert.match(await notes.locator('.folder[open] summary').textContent(), /Carriker/);
-  const common = ['.site-header', 'h1', '.intro', '#query', 'button', '.folder', '.folder summary', 'th', '.catalogue-summary', '.site-footer'];
+  const common = ['.site-header', 'h1', '#catalogue > h2', '.intro', '#query', 'button', '.folder', '.folder summary', 'th', '.catalogue-summary', '.site-footer'];
   assert.deepEqual(await appearance(notes, common), await appearance(letters, common));
   for (const [name, page] of [['notes', notes], ['reference', letters]]) {
     await page.screenshot({ path: path.join(output, name + '-catalogue-' + size.width + '.png') });
@@ -46,6 +46,7 @@ async function check(browser, size) {
   }
   const panels = ['.letter-nav', '.letter-heading h2', '.letter-summary', '.page-columns', '.scan-sheet', '.transcript-sheet pre', '.panel'];
   assert.deepEqual(await appearance(notes, panels), await appearance(letters, panels));
+  for (const page of [notes, letters]) assert.equal(await page.locator('#record').getAttribute('data-wide-transcription'), 'true');
   const actual = await geometry(notes), expected = await geometry(letters);
   // The added enlargement button makes the mobile caption taller. Compare the sheets themselves.
   for (let i = 0; i < actual.length; i++) {
@@ -53,7 +54,7 @@ async function check(browser, size) {
     assert.deepEqual(sheet, referenceSheet);
     assert.equal(sheet.fit, 'contain');
     assert.ok(Math.abs(sheet.width / sheet.height - sheet.original[0] / sheet.original[1]) < 0.01);
-    if (size.width > 760) { assert.equal(textTop, referenceTop); assert.ok(sheet.textLeft > 0); }
+    if (size.width > 760) { assert.equal(textTop, referenceTop); assert.ok(sheet.textLeft > 0 && sheet.textWidth > sheet.width); }
     else { assert.equal(sheet.textLeft, 0); assert.ok(textTop > sheet.height && referenceTop > sheet.height); }
   }
   for (const [name, page] of [['notes', notes], ['reference', letters]]) {
@@ -62,15 +63,22 @@ async function check(browser, size) {
   await notes.getByRole('button', { name: 'Enlarge scan' }).first().click();
   await notes.locator('dialog[open] img').waitFor();
   await notes.keyboard.press('Escape');
-  await notes.getByRole('link', { name: '← Browse notes' }).first().click();
+  await notes.getByRole('link', { name: '← All notes' }).first().click();
   await notes.locator('#browse-mode').selectOption('species');
   await notes.getByRole('heading', { name: 'Species groups' }).waitFor();
   await notes.locator('#collector-filter').selectOption('Carriker');
   await notes.locator('#query').fill('12a');
   await notes.getByRole('button', { name: 'Search', exact: true }).click();
-  await notes.waitForFunction(() => document.querySelector('#message').textContent.startsWith('1 note(s) in 1 species group'));
+  await notes.waitForFunction(() => document.querySelector('#message').textContent === '1 note in 1 species group');
   await notes.getByRole('button', { name: 'Show all' }).click();
-  await notes.waitForFunction(() => document.querySelector('#message').textContent.startsWith('3 note(s)'));
+  await notes.waitForFunction(() => document.querySelector('#message').textContent.startsWith('3 notes'));
+  await notes.goto(origin + '/?number=8420');
+  await notes.waitForFunction(() => document.querySelector('#message').textContent === '1 note in 1 collector folder');
+  await notes.getByRole('link', { name: /^Read note:/ }).click();
+  const hit = notes.locator('.transcript-sheet mark');
+  await hit.waitFor();
+  assert.equal(await hit.textContent(), '8419-20');
+  assert.match(await notes.locator('.transcript-sheet pre').first().textContent(), /East ridge \(8419-20\)/);
   assert.deepEqual(errors, []);
   await context.close();
   return { viewport: size, pages: actual };

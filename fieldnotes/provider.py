@@ -4,23 +4,28 @@ from pathlib import Path
 
 
 def api_key(env_file=None):
-    if env_file:
-        path = Path(env_file)
-        if not path.is_file():
-            raise ValueError(f"Credential file not found: {path}")
-        values = {}
-        for line in path.read_text(encoding="utf-8-sig").splitlines():
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            key, sep, value = line.partition("=")
-            if not sep or key.strip() not in {"GEMINI_API_KEY", "GOOGLE_API_KEY"}:
-                raise ValueError("Credential file accepts only GEMINI_API_KEY or GOOGLE_API_KEY assignments")
-            values[key.strip()] = value.strip().strip("'\"")
-        secret = values.get("GEMINI_API_KEY") or values.get("GOOGLE_API_KEY")
-    else:
+    if not env_file:
         secret = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if secret:
+            return secret
+
+    path = Path(env_file or ".env")
+    if not path.is_file():
+        if env_file:
+            raise ValueError(f"Credential file not found: {path}")
+        raise ValueError("No Gemini key. Add GEMINI_API_KEY to .env in the current directory.")
+
+    values = {}
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if not sep or key.strip() not in {"GEMINI_API_KEY", "GOOGLE_API_KEY"}:
+            raise ValueError(f"{path} accepts only GEMINI_API_KEY or GOOGLE_API_KEY assignments")
+        values[key.strip()] = value.strip().strip("'\"")
+    secret = values.get("GEMINI_API_KEY") or values.get("GOOGLE_API_KEY")
     if not secret:
-        raise ValueError("No Gemini key; set GEMINI_API_KEY or pass --env-file .env")
+        raise ValueError(f"No Gemini key in {path}. Add a GEMINI_API_KEY assignment.")
     return secret
 
 

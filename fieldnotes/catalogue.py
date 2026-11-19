@@ -52,7 +52,39 @@ def note_number_key(record):
     return (values[0] if values else number_key(None), tuple(values), record["note_id"])
 
 
-def project(record, registry):
+def matches_number(values, query):
+    """Look up decimal members without expanding ranges or rewriting identifiers."""
+    if query in values:
+        return True
+    if not re.fullmatch(r"[0-9]+", query):
+        return False
+    for value in values:
+        label = value.strip()
+        if label.startswith("(") and label.endswith(")"):
+            label = label[1:-1]
+        # A comma before three digits can be part of one number (8,419).
+        for part in re.split(r";|,(?![0-9]{3}\b)|(?<=[0-9]{4}),", label):
+            match = re.fullmatch(r"\s*([0-9]+)(?:[ \t]*[-–—−][ \t]*([0-9]+))?\s*", part)
+            if not match:
+                continue
+            start, end = match.groups()
+            if not end:
+                if query == start:
+                    return True
+                continue
+            if len(end) < len(start):
+                end = start[:len(start) - len(end)] + end
+            padded = len(start) > 1 and start.startswith("0")
+            if padded and (len(query) != len(start) or len(end) != len(start)):
+                continue
+            if not padded and any(len(n) > 1 and n.startswith("0") for n in (query, end)):
+                continue
+            if (len(start), start) <= (len(query), query) <= (len(end), end):
+                return True
+    return False
+
+
+def project(record, registry, scan_sets=()):
     doc = record.get("document") or {}
     collector_field = doc.get("metadata", {}).get("collector", {})
     authority, conflict = resolve(collector_field, "collector", registry)
@@ -93,20 +125,24 @@ def project(record, registry):
     number_label = ", ".join(numbers) or "Number not recorded"
     search_doc = dict(doc)
     search_doc["dates"] = [dict(d, normalized=usable_date(d)) for d in doc.get("dates", [])]
-    search_text = " ".join([record["note_id"], collector, folder, *record["hints"].get("filenames", []),
+    search_text = " ".join([record["note_id"], collector, folder, *scan_sets, *record["hints"].get("filenames", []),
                             *aliases, json.dumps(search_doc, ensure_ascii=False)])
-    return dict(collector=collector, collector_folder=folder, collector_basis=collector_basis,
+    return dict(collector=collector, collector_folder=folder, collector_basis=collector_basis, scan_sets=list(scan_sets),
                 numbers=numbers, number_label=number_label, species=species,
                 title=species + " — " + number_label, species_groups=groups,
                 aliases=sorted(set(aliases)), search_text=search_text.casefold(), conflicts=conflicts)
 
 
-def browse(records, *, query="", collector="", mode="collector", sort="number"):
+def browse(records, *, query="", collector="", scan_set="", mode="collector", sort="number"):
     if mode not in {"collector", "species"} or sort not in {"number", "species"}:
         raise ValueError("Browse mode collector/species; sort number/species")
+    query = query.strip()
+    numeric = re.fullmatch(r"[0-9]+", query)
     matches = [r for r in records if r["active"] and (not collector or collector in
                {r["catalogue"]["collector"], r["catalogue"]["collector_folder"]})
-               and query.casefold() in r["catalogue"]["search_text"]]
+               and (not scan_set or scan_set in r["catalogue"].get("scan_sets", []))
+               and (query.casefold() in r["catalogue"]["search_text"] or
+                    (numeric and matches_number(r["catalogue"]["numbers"], query)))]
     matches.sort(key=(lambda r: (search_name(r["catalogue"]["species"]), note_number_key(r)))
                  if sort == "species" else note_number_key)
     groups = {}

@@ -9,6 +9,119 @@ from .helpers import Workspace, jpeg
 
 
 class DiscoveryTests(Workspace):
+    def test_staging_deletions_and_rescans_are_invisible_until_set_completion(self):
+        log = self.root / "card-backs.txt"
+        log.write_text("C/set2 | all-pairs", encoding="utf-8")
+        jpeg(self.inputs / "C/set1/done.jpg", "blue")
+        draft = self.inputs / "C/set2/discarded.jpg"
+        jpeg(draft)
+        first = discover(self.inputs, card_back_log=log, complete_sets=["C/set1"])
+        self.assertEqual([i["path"] for i in first["images"]], ["C/set1/done.jpg"])
+        draft.unlink()
+        names = ["IMG_2020_01_02_11_00_10S.jpg", "IMG_2020_01_02_11_00_20S.jpg"]
+        for name, color in zip(names, ("red", "white"), strict=True):
+            jpeg(self.inputs / "C/set2" / name, color)
+        jpeg(self.inputs / "C/set1/later.jpg")
+        self.assertEqual(discover(self.inputs, first, card_back_log=log), first)
+        second = discover(self.inputs, first, card_back_log=log, complete_sets=["C/set2"])
+        self.assertEqual({i["path"] for i in second["images"]}, {"C/set1/done.jpg", *("C/set2/" + n for n in names)})
+        self.assertIn(first["notes"][0], second["notes"])
+        self.assertEqual([n["hints"]["filenames"] for n in second["notes"] if n["override"]], [names])
+
+    def test_timestamp_order_explicit_front_and_duplex_set_with_a_pending_back(self):
+        def scan(folder, second, color):
+            name = f"IMG_2020_01_02_11_00_{second:02d}S.jpg"
+            jpeg(self.inputs / folder / name, color)
+            return name
+        front = scan("C/one", 20, "green")
+        back = scan("C/one", 30, "blue")
+        loose = scan("C/one", 10, "red")
+        # Deliberately insert out of order. The white JPEG represents a blank reverse.
+        last = scan("C/two", 30, "red")
+        second = scan("C/two", 20, "white")
+        first = scan("C/two", 10, "blue")
+        log = self.root / "card-backs.txt"
+        log.write_text(f"C/one | {front}\nC/two | all-pairs\n", encoding="utf-8")
+        before = discover(self.inputs, card_back_log=log, complete_sets=["C/one", "C/two"])
+        notes = {tuple(n["hints"]["filenames"]): n for n in before["notes"]}
+        self.assertEqual(set(notes), {(front, back), (loose,), (first, second), (last,)})
+        waiting = notes[(last,)]
+        self.assertEqual(waiting["grouping"], "needs_review")
+        with self.assertRaisesRegex(ValueError, "Awaiting"):
+            prepare_request(before, waiting, self.config)
+        final = scan("C/two", 40, "white")
+        after = discover(self.inputs, before, card_back_log=log, complete_sets=["C/two"])
+        ready = next(n for n in after["notes"] if n["note_id"] == waiting["note_id"])
+        self.assertEqual(ready["hints"]["filenames"], [last, final])
+        self.assertEqual(len(prepare_request(after, ready, self.config)["image_data"]), 2)
+        four = ["C/two/" + name for name in [first, second, last, final]]
+        combined = regroup(after, dict(version=1, groups=[dict(key="long", paths=four, source="Checked continuation")]))
+        self.assertIn(four, [n["override"]["paths"] for n in combined["notes"] if n["active"] and n["override"]])
+        scan("C/two", 15, "red")
+        with self.assertRaisesRegex(ValueError, "change the saved pair"):
+            discover(self.inputs, after, card_back_log=log, complete_sets=["C/two"])
+
+    def test_duplex_rule_is_folder_scoped_and_fails_for_tied_scanner_times(self):
+        log = self.root / "card-backs.txt"
+        log.write_text("C/set2 | all-pairs", encoding="utf-8")
+        jpeg(self.inputs / "C/set20/unrelated.jpg")
+        self.assertEqual(len(discover(self.inputs, card_back_log=log, complete_sets=["C/set20"])["notes"]), 1)
+        for ext in ("jpg", "jpeg"):
+            jpeg(self.inputs / ("C/set2/IMG_2020_01_02_11_00_30S." + ext))
+        with self.assertRaisesRegex(ValueError, "Tied scanner timestamps"):
+            discover(self.inputs, card_back_log=log, complete_sets=["C/set2"])
+
+    def test_scan_log_pairs_only_named_sides_and_keeps_front_ids(self):
+        folder = "Collector/set1"
+        for index, name in enumerate(("one.jpg", "two.jpg", "three.jpg", "four.jpg", "five.jpg")):
+            jpeg(self.inputs / folder / name, (index * 30, 100, 150))
+        jpeg(self.inputs / "Collector/set10/two.jpg")
+        completed = [folder, "Collector/set10"]
+        before = discover(self.inputs, complete_sets=completed)
+        ids = {n["image_ids"][0]: n["note_id"] for n in before["notes"]}
+        images = {i["path"]: i["image_id"] for i in before["images"]}
+        log = self.root / "card-backs.txt"
+        log.write_text("# scanner log\nCollector/set1 | one.jpg | two.jpg\nCollector/set1 | three.jpg | four.jpg\n", encoding="utf-8-sig")
+        after = discover(self.inputs, before, card_back_log=log)
+        first_inventory = discover(self.inputs, card_back_log=log, complete_sets=completed)
+        notes = {n["note_id"]: n for n in after["notes"]}
+        for front, back in [("one.jpg", "two.jpg"), ("three.jpg", "four.jpg")]:
+            pair = [images[folder + "/" + name] for name in (front, back)]
+            note = notes[ids[pair[0]]]
+            self.assertEqual(note["image_ids"], pair)
+            self.assertFalse(notes[ids[pair[1]]]["active"])
+            self.assertIn(note, first_inventory["notes"])
+            prepared = prepare_request(after, note, self.config)
+            self.assertEqual([i["side"] for i in prepared["provenance"]["images"]], ["Front", "Back"])
+            self.assertEqual(prepared["image_data"], [(self.inputs / folder / name).read_bytes() for name in (front, back)])
+        self.assertEqual(sum(n["active"] for n in notes.values()), 4)
+        self.assertEqual(discover(self.inputs, after, card_back_log=log), after)
+        log.unlink()
+        self.assertEqual(discover(self.inputs, after, card_back_log=log), after)
+        log.write_text("Collector/set1 | one.jpg | five.jpg\n", encoding="utf-8")
+        corrected = discover(self.inputs, after, card_back_log=log)
+        front = next(n for n in corrected["notes"] if n["note_id"] == ids[images[folder + "/one.jpg"]])
+        self.assertEqual(front["image_ids"], [images[folder + "/" + name] for name in ("one.jpg", "five.jpg")])
+        self.assertEqual(sum(n["active"] for n in corrected["notes"]), 5)
+
+    def test_scan_log_preserves_other_groups_and_rejects_conflicts_and_typos(self):
+        self.setup_note(names=["C/set1/first.jpg", "C/set1/second.jpg"], complete_sets=["C/set1"])
+        for name in ("third.jpg", "fourth.jpg"):
+            jpeg(self.inputs / "C/set1" / name)
+        log = self.root / "card-backs.txt"
+        log.write_text("C/set1 | third.jpg | fourth.jpg\n", encoding="utf-8")
+        inventory = discover(self.inputs, self.inventory, card_back_log=log, complete_sets=["C/set1"])
+        self.assertEqual(inventory["overrides"]["groups"][0], self.inventory["overrides"]["groups"][0])
+        manual_reset = regroup(inventory, {"version": 1, "groups": []})
+        self.assertEqual([g["paths"] for g in manual_reset["overrides"]["groups"]], [["C/set1/third.jpg", "C/set1/fourth.jpg"]])
+        for entry in ("first.jpg | third.jpg", "third.jpg | unknown.jpg", "third.jpg | ../fourth.jpg",
+                      "third.jpg | third.jpg", "third.jpg | fourth.jpg\nC/set1 | fourth.jpg | third.jpg",
+                      "third.jpg", "third.jpg | nonimage.txt"):
+            with self.subTest(entry=entry):
+                log.write_text("C/set1 | " + entry, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    discover(self.inputs, inventory, card_back_log=log)
+
     def test_old_path_reused_after_reconciliation_has_distinct_identity(self):
         self.setup_note(names=["C/first.jpg"])
         (self.inputs / "C/first.jpg").rename(self.inputs / "C/moved.jpg")

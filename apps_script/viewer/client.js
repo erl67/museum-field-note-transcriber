@@ -7,24 +7,51 @@ function element(tag, text, parent, className) {
   if (parent) parent.appendChild(node);
   return node;
 }
-const state = { query: document.body.dataset.query || '', mode: document.body.dataset.mode || 'collector',
-  collector: document.body.dataset.collector || '', group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
+const state = { number: document.body.dataset.number || '', query: document.body.dataset.query || '', mode: document.body.dataset.mode || 'collector',
+  collector: document.body.dataset.collector || '', set: document.body.dataset.set || '',
+  group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
 let expanded = {};
 try { expanded = JSON.parse(sessionStorage.getItem('fieldnotes-folders') || '{}'); } catch (error) { expanded = {}; }
 function urlFor(id, group) {
   const values = { ...state, group: group === undefined ? state.group : group };
+  if (values.number) delete values.query;
   if (id) values.note = id;
   return document.body.dataset.url + '?' + Object.entries(values).filter(([, v]) => v).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
 }
 function linkTo(id, label, parent, group) {
   const a = element('a', label, parent); a.href = urlFor(id, group); return a;
 }
+function renderShareLink(parent, id) {
+  const url = document.body.dataset.url + '?note=' + encodeURIComponent(id);
+  const share = element('div', null, parent, 'letter-share');
+  const button = element('button', 'Copy note link', share); button.type = 'button';
+  const status = element('span', '', share, 'letter-share-status muted');
+  status.setAttribute('role', 'status');
+  const field = element('input', null, share);
+  field.type = 'url'; field.value = url; field.readOnly = true; field.hidden = true;
+  field.setAttribute('aria-label', 'Public note link');
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      field.hidden = true; status.textContent = 'Link copied.';
+    } catch (error) {
+      field.hidden = false; field.focus(); field.select();
+      status.textContent = 'Copy the selected link.';
+    }
+  });
+}
 function defaultFolderExpanded(folder) { return state.mode === 'collector' && folder.name === 'Carriker'; }
-function expansionKey(folder) { return JSON.stringify([state.mode, state.collector, state.query, folder.key]); }
-function pageCountLabel(count) { return count + (count === 1 ? ' page' : ' pages'); }
+function expansionKey(folder) {
+  const key = [state.mode, state.collector, state.query, folder.key];
+  if (state.set) key.push(state.set);
+  if (state.number) key.push('number=' + state.number);
+  return JSON.stringify(key);
+}
+function countLabel(count, noun) { return count + ' ' + noun + (count === 1 ? '' : 's'); }
 function renderFolders(result) {
   const root = document.getElementById('results'); root.replaceChildren();
-  document.getElementById('message').textContent = result.total + ' note(s) in ' + result.folders.length + (state.mode === 'collector' ? ' collector folder(s)' : ' species group(s)');
+  document.getElementById('message').textContent = countLabel(result.total, 'note') + ' in ' +
+    countLabel(result.folders.length, state.mode === 'collector' ? 'collector folder' : 'species group');
   document.getElementById('browse-title').textContent = state.mode === 'collector' ? 'Collector folders' : 'Species groups';
   document.getElementById('browse-intro').textContent = state.mode === 'collector' ?
     'Expand a folder to browse notes by species and collection number. The most recently processed collector appears first. Number order is not chronological.' :
@@ -33,7 +60,14 @@ function renderFolders(result) {
   element('option', 'All collectors', filter).value = '';
   for (const collector of result.collectors) element('option', collector, filter).value = collector;
   filter.value = state.collector;
-  if (!result.folders.length) element('p', state.query ? 'No notes match this search.' : 'No notes are available in this export.', root);
+  const setFilter = document.getElementById('set-filter'); setFilter.replaceChildren();
+  element('option', 'All sets', setFilter).value = '';
+  const sets = result.sets;
+  for (const set of sets) element('option', set, setFilter).value = set;
+  if (state.set && !sets.includes(state.set)) element('option', state.set, setFilter).value = state.set;
+  setFilter.value = state.set;
+  document.getElementById('set-label').hidden = !sets.length && !state.set;
+  if (!result.folders.length) element('p', state.query || state.set || state.collector ? 'No notes match this selection.' : 'No notes are available in this export.', root);
   for (const folder of result.folders) {
     const details = element('details', null, root, 'folder'), key = expansionKey(folder);
     details.open = Object.prototype.hasOwnProperty.call(expanded, key) ? expanded[key] : Boolean(state.query || state.group === folder.key || defaultFolderExpanded(folder));
@@ -42,20 +76,21 @@ function renderFolders(result) {
       try { sessionStorage.setItem('fieldnotes-folders', JSON.stringify(expanded)); } catch (error) { /* Optional session persistence. */ }
     });
     const heading = element('summary', folder.name, details);
-    element('span', folder.notes.length + ' note(s)' + (state.mode === 'species' ?
+    element('span', countLabel(folder.notes.length, 'note') + (state.mode === 'species' ?
       ' · ' + (folder.rank || 'unknown rank') + ' · ' + folder.uncertain + ' uncertain' : ''), heading, 'folder-count');
     const wrap = element('div', null, details, 'table-wrap'), table = element('table', null, wrap);
     table.setAttribute('aria-label', 'Notes in ' + folder.name);
     const header = element('tr', null, element('thead', null, table));
-    for (const label of ['Species', 'Collection number(s)', 'Collector', 'Reading']) element('th', label, header).scope = 'col';
+    for (const label of ['Species', 'Collection numbers', 'Collector', 'Reading']) element('th', label, header).scope = 'col';
     const body = element('tbody', null, table);
     for (const note of folder.notes) {
       const row = element('tr', null, body), cat = note.catalogue;
       element('td', cat.species, row); element('td', cat.number_label, row);
-      element('td', cat.collector, row);
+      const collector = element('td', cat.collector, row);
+      if (cat.scan_sets.length) element('span', cat.scan_sets.join(', '), collector, 'field-note');
       const reading = element('td', null, row), a = linkTo(note.note_id, 'Read note →', reading, folder.key);
       a.setAttribute('aria-label', 'Read note: ' + cat.title + ', ' + cat.collector + ', ' + note.note_id);
-      element('span', pageCountLabel(note.page_count) + ' · ' + note.execution, reading, 'field-note');
+      element('span', countLabel(note.page_count, 'page') + ' · ' + note.execution, reading, 'field-note');
       if (note.summary_snippet) {
         const summaryRow = element('tr', null, body, 'catalogue-summary-row'), cell = element('td', null, summaryRow); cell.colSpan = 4;
         element('p', note.summary_snippet, cell, 'catalogue-summary');
@@ -74,7 +109,7 @@ function loadFolders() {
 }
 function renderNavigation(root, navigation, position) {
   const nav = element('nav', null, root, 'letter-nav'); nav.setAttribute('aria-label', 'Note navigation ' + position);
-  const back = element('a', '← Browse notes', nav, 'button'); back.href = urlFor(null);
+  const back = element('a', '← All notes', nav, 'button'); back.href = urlFor(null);
   if (!navigation) return;
   element('span', navigation.position ? 'Note ' + navigation.position + ' of ' + navigation.total : 'Outside current browse selection', nav, 'nav-position');
   const steps = element('div', null, nav, 'nav-steps');
@@ -85,10 +120,35 @@ function renderNavigation(root, navigation, position) {
   }
 }
 
-    function renderPage(root, scan, page, note, number, jobs) {
+function needsWiderTranscription(note) {
+  const hasLongLine = ({ text }) => (text || '').split(/\r?\n/).some(line => line.trimEnd().length >= 72);
+  return note.pages.some(page => hasLongLine(page) || (page.annotations || []).some(hasLongLine)) ||
+    (note.translations || []).some(hasLongLine);
+}
+
+function renderSourceText(parent, text, tokens) {
+  const pre = element('pre', null, parent);
+  if (!tokens.size) { pre.textContent = text; return; }
+  const numbers = /(?<![\p{L}\p{N}_])([0-9]+)(?:[ \t]*[-–—−][ \t]*([0-9]+))?(?![\p{L}\p{N}_])/gu;
+  let cursor = 0;
+  for (const match of text.matchAll(numbers)) {
+    const [written, first, last] = match;
+    if (!tokens.has(last ? first + '-' + last : first)) continue;
+    let start = match.index, end = start + written.length;
+    if (first === state.query) end = start + first.length;
+    else if (last === state.query) start = end - last.length;
+    pre.appendChild(document.createTextNode(text.slice(cursor, start)));
+    const mark = element('mark', text.slice(start, end), pre, 'number-match');
+    mark.title = 'Catalogue number ' + state.query;
+    cursor = end;
+  }
+  pre.appendChild(document.createTextNode(text.slice(cursor)));
+}
+
+    function renderPage(root, scan, page, note, number, jobs, hits) {
       const pair = element('section', null, root, 'page-pair');
       pair.dataset.imageId = scan ? scan.image_id : page.image_id;
-      element('h3', 'Page ' + number, pair);
+      element('h3', 'Page ' + number + (scan && scan.side ? ' · ' + scan.side : ''), pair);
       const columns = element('div', null, pair, 'page-columns');
       const figure = element('figure', null, columns, 'page-column');
       element('p', 'Original scan', figure, 'column-label');
@@ -104,16 +164,20 @@ function renderNavigation(root, navigation, position) {
       const text = element('section', null, columns, 'page-column');
       element('p', 'Source-language transcription', text, 'column-label');
       const transcript = element('div', null, text, 'page-sheet transcript-sheet');
-      transcript.tabIndex = 0;
       transcript.setAttribute('role', 'region');
       transcript.setAttribute('aria-label', 'Transcription, page ' + number);
       if (!page) element('p', 'No complete transcription is available for this page.', transcript);
       else {
         if (page.status !== 'text') element('p', 'Page status: ' + page.status, transcript, 'page-status');
-        element('pre', page.text, transcript);
-        for (const note of page.annotations || []) {
-          element('h4', 'Annotation (' + note.kind + ')', transcript);
-          element('pre', note.text, transcript);
+        const tokens = new Set();
+        for (const hit of hits) {
+          const evidence = (note.identifiers || []).filter(field => field.value === hit.value).flatMap(field => field.evidence || []);
+          if (!evidence.length || evidence.some(e => e.image_id === page.image_id)) tokens.add(hit.token);
+        }
+        renderSourceText(transcript, page.text, tokens);
+        for (const annotation of page.annotations || []) {
+          element('h4', 'Annotation (' + annotation.kind + ')', transcript);
+          renderSourceText(transcript, annotation.text, tokens);
         }
       }
       for (const translation of note.translations || []) {
@@ -161,9 +225,10 @@ function renderMetadata(root, note) {
   const section = element('section', null, root, 'panel'); element('h3', 'Note details', section);
   const grid = element('dl', null, section, 'metadata-grid');
   const values = [['Collector', note.catalogue.collector + ' (' + note.catalogue.collector_basis + ')'],
-    ['Collection number(s)', note.catalogue.number_label], ['Species', note.catalogue.species],
+    ['Collection numbers', note.catalogue.number_label], ['Species', note.catalogue.species],
     ['Archival ID', note.note_id], ['Transcription', note.execution], ['Grouping', note.grouping],
     ['Metadata review', note.metadata_review], ['Transcription review', note.transcription_review]];
+  if (note.catalogue.scan_sets.length) values.push(['Scan set', note.catalogue.scan_sets.join(', ')]);
   for (const [label, text] of values) {
     const item = element('div', null, grid); element('dt', label, item); element('dd', text, item);
   }
@@ -181,27 +246,31 @@ function renderMetadata(root, note) {
   }
   if ((note.notes || []).length) { element('h3', 'Separate notes', section); element('p', note.notes.join('\n'), section, 'preserve'); }
   if (note.active === false) element('p', 'Retired grouping retained for history.', section, 'notice');
+  return section;
 }
 function renderNote(result) {
   Object.assign(state, result.context || {});
   const root = document.getElementById('record'); root.replaceChildren(); root.hidden = false;
   document.getElementById('catalogue').hidden = true;
   const note = result.note;
+  root.dataset.wideTranscription = String(needsWiderTranscription(note));
   renderNavigation(root, result.navigation, 'top');
   const heading = element('header', null, root, 'letter-heading');
   element('p', note.catalogue.collector, heading, 'eyebrow'); element('h2', note.catalogue.title, heading);
-  element('p', pageCountLabel(note.scans.length) + ' · ' + note.execution, heading, 'muted');
+  element('p', countLabel(note.scans.length, 'page') + ' · ' + note.execution, heading, 'muted');
+  const hits = result.numberMatches || [];
+  if (hits.length) element('p', 'Matched catalogue number ' + state.query, heading, 'field-note');
   if (note.summary) {
     const summary = element('section', null, root, 'letter-summary');
     element('p', 'Interpretive summary', summary, 'eyebrow'); element('p', note.summary, summary);
   }
-  element('p', 'Each scan is paired with its transcription. Longer transcriptions scroll within their panel.', root, 'reading-help');
   const jobs = [], pages = new Map(note.pages.map(p => [p.image_id, p]));
-  note.scans.forEach((scan, index) => renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs));
+  note.scans.forEach((scan, index) => renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs, hits));
   const scans = new Set(note.scans.map(s => s.image_id)); let number = note.scans.length;
-  for (const page of note.pages) if (!scans.has(page.image_id)) renderPage(root, null, page, note, ++number, jobs);
+  for (const page of note.pages) if (!scans.has(page.image_id)) renderPage(root, null, page, note, ++number, jobs, hits);
   if (!number) element('p', 'No source pages or complete transcription are available.', root, 'notice');
-  renderMetadata(root, note);
+  const metadata = renderMetadata(root, note);
+  if (result.publicMode && /^note_[0-9a-f]{32}$/.test(note.note_id)) renderShareLink(metadata, note.note_id);
   const details = element('details', null, root, 'provenance');
   element('summary', result.publicMode ? 'Metadata evidence' : 'Metadata evidence and provenance', details);
   const evidence = { metadata: note.metadata, entries: note.entries, identifiers: note.identifiers, taxa: note.taxa,
@@ -220,13 +289,19 @@ document.getElementById('query').value = state.query;
 document.getElementById('browse-mode').value = state.mode;
 document.getElementById('sort-order').value = state.sort;
 document.getElementById('search').addEventListener('submit', event => {
-  event.preventDefault(); state.query = document.getElementById('query').value; state.group = ''; loadFolders();
+  event.preventDefault(); state.query = document.getElementById('query').value.trim();
+  state.number = /^[0-9]+$/.test(state.query) ? state.query : '';
+  state.group = ''; loadFolders();
 });
 document.getElementById('clear-search').addEventListener('click', () => {
-  document.getElementById('query').value = ''; state.query = ''; state.collector = ''; state.group = ''; loadFolders();
+  document.getElementById('query').value = ''; state.query = ''; state.number = ''; state.collector = ''; state.set = ''; state.group = ''; loadFolders();
 });
-for (const [id, key] of [['browse-mode', 'mode'], ['collector-filter', 'collector'], ['sort-order', 'sort']]) {
-  document.getElementById(id).addEventListener('change', () => { state[key] = document.getElementById(id).value; state.group = ''; loadFolders(); });
+for (const [id, key] of [['browse-mode', 'mode'], ['collector-filter', 'collector'], ['set-filter', 'set'], ['sort-order', 'sort']]) {
+  document.getElementById(id).addEventListener('change', () => {
+    state[key] = document.getElementById(id).value; state.group = '';
+    if (key === 'collector') state.set = '';
+    loadFolders();
+  });
 }
 if (!document.getElementById('initial-error').textContent.trim()) {
   if (document.body.dataset.note) openNote(document.body.dataset.note); else loadFolders();

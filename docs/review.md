@@ -46,9 +46,23 @@ Save a staff-prepared JSON object under `local/alias.json`. This invented exampl
 
 Use kind `collector` for people and omit rank. Creation returns a permanent `tax_` or `col_` ID. To revise or withdraw an authority, supply its existing ID, the complete name/alias record, source and `review_status` of approved or withdrawn. An explicit review may also assign `authority_id` to a taxon field of the same rank or the written collector field. All original transcriptions remain in the underlying revisions. Multiple matches are surfaced for review. Approved names can provide suggestions in a later request. They do not establish authorship, handwriting or a species identification by themselves.
 
+## Record two-sided cards
+
+Keep `card-backs.txt` beside the journal in the selected store, normally `local/collection/`. Use a plain UTF-8 text file. Each line names the folder relative to **Field Notes**. For a mixed pile, give the front filename or both exact filenames. For a pile scanned on both sides throughout, use one `all-pairs` line.
+
+```text
+Carriker/set1 | IMG_2020_01_02_11_00_10S.jpg
+Other collector | separate-front.jpg | verified-back.jpg
+Carriker/set2 | all-pairs
+```
+
+Blank lines and lines beginning with `#` are fine. Use `/` between folder names. Automatic pairing uses JPEGs from the exact folder and sorts by the full scanner date and time. For example, `IMG_2020_01_02_11_00_10S.jpg` precedes `IMG_2020_01_02_11_00_25S.jpg`. A missing final back leaves that front waiting. An unrecognized filename, tied timestamp, or changed order that would reassign a saved partner requires checking the filenames. Existing three-column entries can specify exact partners regardless of naming or scan order. If a note spans multiple physical cards in an `all-pairs` folder, use an explicit manual group containing all sides in their verified page order.
+
+You can prepare the scanner log while a set is in progress. Once scanning is complete, use `dry-run --input $scans --complete-set 'Carriker/set2'` to preview the pairs, then `inventory` with the same arguments to save them. A routine refresh leaves unadmitted set folders alone. Each pair keeps the front's note ID and the exact order of both images. A back with an existing individual record is retired with its history. The transcription and metadata still have their own review states. Edit or remove a line and rerun inventory to correct the log for saved scans. If the file is absent, the last saved pairs stay available. Back it up with the journal and update its filenames after reconciling moved scans.
+
 ## Assemble a note and preserve links
 
-Use `show --note` or `images.csv` to identify exact paths. Group overrides form a **complete replacement set** of staff decisions. Retain existing groups when adding another. Each group needs a persistent key, ordered relative paths with forward slashes, and source/reason. Include an optional reviewer. Without a supplied note ID a new explicit group receives its own stable ID. To keep a particular bookmark, add the existing `note_id` of the note that should continue. The order in `paths` is the page order.
+Use `show --note` or `images.csv` to identify exact paths for other multipage notes. JSON group overrides replace the full set of manually defined JSON groups. Include existing manual groups when adding another. Scanner-log pairs are retained separately. Each group needs a persistent key, ordered relative paths with forward slashes, and source/reason. Include an optional reviewer. Without a supplied note ID a new explicit group receives its own stable ID. To keep a particular bookmark, add the existing `note_id` of the note that should continue. The order in `paths` is the page order.
 
 ```json
 {"version":1,"groups":[{"key":"valley-card","paths":["Carriker/valley.jpg","Carriker/continuation.jpg"],"source":"Invented fixture labels the second page as a continuation","reviewer":"Example reviewer"}]}
@@ -59,7 +73,7 @@ Use `show --note` or `images.csv` to identify exact paths. Group overrides form 
 & $py -m fieldnotes export
 ```
 
-Unclaimed scans remain individual records. A newly discovered page stays separate until explicitly added. Displaced records are retired and retain their IDs, earlier results and links. Duplicate assignments are rejected. An explicit group spanning folders carries a review reason. Rerunning inventory reuses the saved override unless a new complete set is supplied. A changed group or reordered pages requires a new complete reading for the new evidence.
+Unclaimed scans remain individual records. A newly discovered page stays separate until explicitly added. Displaced records are retired and retain their IDs, earlier results and links. Duplicate assignments are rejected. An explicit group spanning folders carries a review reason. Rerunning inventory reuses saved manual groups unless a replacement `--overrides` file is supplied. A changed group or reordered pages requires a new complete reading for the new evidence.
 
 If someone moves a file **outside the application**, supply the old and new paths before inventorying the new path. The old path must be absent, the new file must be an unclaimed JPEG inside the same root, and its bytes must match the saved original SHA-256. Reconciliation leaves the filesystem alone, updates paths and group definitions, and keeps the previous paths and both stable IDs. A filename alone or a matching hash elsewhere never joins records automatically.
 

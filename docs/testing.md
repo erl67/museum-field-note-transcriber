@@ -9,12 +9,13 @@ $py = '.\.venv\Scripts\python.exe'
 node --test apps_script/viewer/test_viewer.cjs
 ```
 
-The mounted-collection check skips explicitly unless opted in. To include it, set the root before running the Python suite or run just that test. It enumerates the current Carriker JPEGs, compares original hashes, sizes and decoded dimensions, inspects representative unmodified request bytes, and rechecks source hashes. It has no hard-coded inventory count. The Python-to-Apps-Script export test skips if Node is unavailable.
+The mounted-collection check takes the root and the exact completed set to inspect. It compares original hashes, sizes and decoded dimensions in that folder, inspects representative unmodified request bytes, and rechecks source hashes. It skips when either setting is absent. It has no hard-coded inventory count. The Python-to-Apps-Script export test skips if Node is unavailable.
 
 ```powershell
 $env:FIELDNOTES_TEST_ROOT = 'G:\My Drive\Field Notes'
+$env:FIELDNOTES_TEST_SET = 'Carriker/set2'
 & $py -m unittest test.test_collection_integration -v
-Remove-Item Env:FIELDNOTES_TEST_ROOT
+Remove-Item Env:FIELDNOTES_TEST_ROOT, Env:FIELDNOTES_TEST_SET
 ```
 
 | Area | What is exercised |

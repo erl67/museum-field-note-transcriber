@@ -23,9 +23,13 @@ Open [the local preview](http://127.0.0.1:8783/). It serves the actual template 
 
 The server rechecks the gate for the page and each restricted RPC. `listFolders` returns lightweight rows without scan bytes or page text. `loadNote` accepts the stable note ID and browse context. `loadImage` accepts only a note ID, an image ID belonging to that note and an export token. The token binds an image request to the bytes of the export that supplied its text.
 
+## Find a catalogue number
+
+Type the digits into Search or use `?number=8420` or `?8420` on the viewer URL. This looks up saved identifiers, including the endpoints and interior of an inclusive range. The results show all matching cards and their as-written numbers. Opening a card highlights the literal number or its written range in the transcription, on the evidence page when identified. The general `?q=` and `?query=` searches also include matches elsewhere in the saved text.
+
 ## Resolve a scan
 
-The preferred setup uses one Field Notes root folder ID. For a path such as `Carriker/valley.jpg` the server walks exact child names from that root, one folder at a time. A duplicate folder or filename stops lookup. A missing or invisible child can have the same Drive response. The viewer reports that uncertainty and keeps the transcription visible.
+The preferred setup uses one Field Notes root folder ID. For a path such as `Carriker/set1/valley.jpg` the server walks exact child names from that root, one folder at a time. A duplicate folder or filename stops lookup. A missing or invisible child can have the same Drive response. The viewer reports that uncertainty and keeps the transcription visible.
 
 Explicit mappings take precedence for selected images. For each mapped image use its real Drive file ID and the **original** SHA-256 from `images.csv`. This template intentionally contains placeholders. Save the filled file under ignored `local/drive-mapping.json`.
 
@@ -59,6 +63,6 @@ The public gate uses a shared short-lived request budget of 120 RPC/page request
 
 ## Template maintenance
 
-`reference.css` is the exact first style block of the current correspondence template, including whitespace after LF normalization. The embedded first style block must match it byte for byte. The second block adds only inherited styling for the three selectors, their spacing, and the enlargement button/dialog. The header, footer, table, summary, navigation, reading panels and responsive rules retain the reference styles. The footer points to the verified [field-note repository](https://github.com/erl67/museum-field-note-transcriber).
+`reference.css` is the exact first style block of the correspondence template, including whitespace after LF normalization. The embedded first style block must match it byte for byte. The second block styles the browse selectors, scan enlargement and the catalogue-number highlight. Transcription panels grow with their text. When a page, annotation or translation contains a line of 72 characters or more, all desktop pages in that note use the reference's 47/53 scan-to-text split. Shorter lines use equal columns. The footer points to the [field-note repository](https://github.com/erl67/museum-field-note-transcriber).
 
-The current template orders collector folders by latest finished processing activity when available and alphabetically on ties. Carriker opens by name regardless of that order. Search or species browsing uses context-specific saved expansion choices. A stable bookmark starts with `?note=note_…`. Search, collector, grouping, sort and mode accompany reader links. Previous and next stay within that selection. Rebuild the embedded script after editing `client.js` with `& $py scripts/build_viewer.py`. See [offline tests](../../docs/testing.md).
+The template orders collector folders by latest finished processing activity when available and alphabetically on ties. Carriker opens by name regardless of that order. The scan-set selector appears for nested folders. Search, collector, set, group, sort and mode follow a reader link and its previous/next navigation. Pages with a recorded side show **Front** or **Back**. In a public deployment, **Copy note link** copies this deployment's `?note=note_…` bookmark, with a selectable URL if clipboard access fails. Rebuild the embedded script after editing `client.js` with `& $py scripts/build_viewer.py`. See [offline tests](../../docs/testing.md).

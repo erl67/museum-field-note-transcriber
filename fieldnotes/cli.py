@@ -3,10 +3,12 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 from . import __version__
-from .catalogue import authorities, browse, request_authorities
+from .card_backs import LOG_NAME
+from .catalogue import authorities, browse, matches_number, request_authorities
 from .config import load_config
-from .discovery import discover, regroup, reconcile_paths
+from .discovery import discover, regroup, reconcile_paths, scan_order
 from .execution import transcribe
 from .exports import export_all
 from .images import prepare_request
@@ -28,6 +30,8 @@ def parser():
     for name in ("inventory", "dry-run"):
         sub = commands.add_parser(name)
         sub.add_argument("--input", required=True)
+        sub.add_argument("--complete-set", action="append", default=[], metavar="COLLECTOR/SET",
+                         help="Admit new scans in this finished set (repeat for more sets). Dry-run only previews.")
         sub.add_argument("--overrides")
         if name == "inventory":
             sub.add_argument("--output", default="local/exports")
@@ -38,12 +42,13 @@ def parser():
     scope.add_argument("--all", action="store_true")
     scope.add_argument("--pending", action="store_true")
     scope.add_argument("--note", action="append")
-    scope.add_argument("--number", help="Exact saved number; rejects ambiguous matches")
+    scope.add_argument("--number", help="Saved identifier or member of a catalogue range; rejects ambiguous matches")
     sub.add_argument("--collector", help="Exact saved collector name or folder")
+    sub.add_argument("--set", dest="scan_set", help="Exact scan folder, e.g. Carriker/set1")
     sub.add_argument("--fresh", action="store_true")
     sub.add_argument("--retry-interrupted", action="store_true")
     sub.add_argument("--profile")
-    sub.add_argument("--env-file")
+    sub.add_argument("--env-file", help="Use a specific credential file (otherwise uses the environment or .env)")
     sub.add_argument("--output", default="local/exports")
     sub.add_argument("--mapping")
     for name in ("export", "publish"):
@@ -59,6 +64,7 @@ def parser():
     sub.add_argument("--note")
     sub.add_argument("--query", default="")
     sub.add_argument("--collector", default="")
+    sub.add_argument("--set", dest="scan_set", default="", help="Exact scan folder, e.g. Carriker/set1")
     sub.add_argument("--mode", choices=("collector", "species"), default="collector")
     sub.add_argument("--sort", choices=("number", "species"), default="number")
     sub = commands.add_parser("review-template")
@@ -103,29 +109,42 @@ def usage_summary(store, run_id=None):
 
 
 def select(records, args):
-    if not any((args.all, args.pending, args.note, args.number, args.collector)):
-        raise ValueError("Select --note, --number, --collector, --pending or --all explicitly")
+    if not any((args.all, args.pending, args.note, args.number, args.collector, args.scan_set)):
+        raise ValueError("Select --note, --number, --collector, --set, --pending or --all explicitly")
     if args.fresh and args.pending:
         raise ValueError("--pending skips completed work; choose --note/--collector/--all with --fresh for a new reading")
     selected = [r for r in records if r["active"] and (not args.collector or args.collector in
-                {r["catalogue"]["collector"], r["catalogue"]["collector_folder"]})]
+                {r["catalogue"]["collector"], r["catalogue"]["collector_folder"]})
+                and (not args.scan_set or args.scan_set in r["catalogue"]["scan_sets"])]
     if args.note:
         selected = [r for r in selected if r["note_id"] in args.note]
         if set(args.note) != {r["note_id"] for r in selected}:
-            raise ValueError("Unknown, retired or collector-mismatched note ID")
+            raise ValueError("Unknown, retired or out-of-scope note ID")
     if args.number:
-        selected = [r for r in selected if args.number in r["catalogue"]["numbers"]]
+        selected = [r for r in selected if matches_number(r["catalogue"]["numbers"], args.number)]
         if len(selected) != 1:
             raise ValueError("Number selector is absent or ambiguous; select stable IDs: " + ", ".join(r["note_id"] for r in selected))
     if args.pending:
         selected = [r for r in selected if r["execution"] != "complete"]
+    if args.scan_set and not selected and not args.pending:
+        raise ValueError("No active notes match that exact scan set and collector selection")
     if args.collector and not selected and not args.pending:
         raise ValueError("No active notes match that exact collector")
     return selected
 
 
+def print_progress(message):
+    print(message, file=sys.stderr, flush=True)
+
+
 def run(args):
+    if args.command == "transcribe":
+        started = time.monotonic()
+        print_progress("Starting field-note transcription. Loading configuration and saved inventory.")
     config, store = load_config(args.config), Store(args.store)
+    if args.command == "transcribe":
+        print_progress(f"Model {config.model}. Pacing {config.rpm:g} requests/minute. "
+                       f"Daily limit {config.daily_limit:,} attempts. Up to {config.attempts} attempts per card.")
     if args.command == "publish":
         destination, output = Path(args.destination).resolve(), Path(args.output).resolve()
         if destination.is_relative_to(output) or output.is_relative_to(destination):
@@ -135,7 +154,8 @@ def run(args):
     if args.command == "dry-run":
         previous = store.latest("inventory")
         overrides = load_file(args.overrides) if args.overrides else None
-        inventory = discover(args.input, previous, overrides, generated_paths(store, args.input))
+        inventory = discover(args.input, previous, overrides, generated_paths(store, args.input),
+                             card_back_log=store.root / LOG_NAME, complete_sets=args.complete_set)
         separate_from_sources(inventory, store.root, config.quota_file)
         profile = load_profile(args.profile)
         context = request_authorities(authorities(store))
@@ -167,10 +187,12 @@ def run(args):
                 value = dict(note_id=args.note, base_revision=value["result"]["revision_id"], base_review=value["review_basis"],
                              source="REPLACE with review basis", reviewer="")
         else:
-            value = browse(records, query=args.query, collector=args.collector, mode=args.mode, sort=args.sort)
+            value = browse(records, query=args.query, collector=args.collector, scan_set=args.scan_set,
+                           mode=args.mode, sort=args.sort)
             indexed = {r["note_id"]: r for r in records}
             value["records"] = [dict(note_id=nid, title=indexed[nid]["catalogue"]["title"],
                                      collector=indexed[nid]["catalogue"]["collector"], execution=indexed[nid]["execution"],
+                                     scan_sets=indexed[nid]["catalogue"]["scan_sets"],
                                      files=indexed[nid]["hints"]["filenames"]) for nid in value["order"]]
         print(json.dumps(value, ensure_ascii=False, indent=2)); return 0
     # Source destinations are checked before creating the first write lock.
@@ -185,7 +207,8 @@ def run(args):
     with lock(store.root / "store.lock"):
         if args.command == "inventory":
             inventory = discover(args.input, store.latest("inventory"), load_file(args.overrides) if args.overrides else None,
-                                 generated_paths(store, args.input))
+                                 generated_paths(store, args.input), card_back_log=store.root / LOG_NAME,
+                                 complete_sets=args.complete_set)
             store.append("inventory", inventory)
             count = export_all(store, inventory, args.output)
             print(f"Saved {count} note records and {len(inventory['images'])} files to {args.output}; zero requests")
@@ -207,42 +230,57 @@ def run(args):
             if args.command == "publish":
                 print(f"Published {publish(store, inventory, args.output, args.destination)} managed outputs to {args.destination}")
         elif args.command == "transcribe":
-            selected = select(current_records(store, inventory), args)
+            selected = scan_order(select(current_records(store, inventory), args), inventory["images"])
+            print_progress(f"Selected {len(selected):,} cards. Reports will be written to {args.output}.")
+            print_progress("Processing order: collector/set, then scan filename (scanner date/time). Paired sides stay together.")
             profile = load_profile(args.profile)  # Frozen for the batch; no automatic profile selection.
             context = request_authorities(authorities(store))
             register_profile(store, profile)
             run_id, failures, reused = identity("run_"), 0, 0
+            completed = 0
             store.append("run_start", dict(run_id=run_id, note_ids=[r["note_id"] for r in selected], settings=config.public(), fresh=args.fresh))
             try:
-                for note in selected:
+                for index, note in enumerate(selected, 1):
+                    folder = ", ".join(note["catalogue"]["scan_sets"]) or note["catalogue"]["collector"]
+                    filenames = ", ".join(note["hints"]["filenames"])
+                    print_progress(f"[{index:,}/{len(selected):,}] Preparing scans from {folder} ({filenames}).")
                     try:
                         request = prepare_request(inventory, note, config, profile, authorities=context)
                     except (ValueError, OSError) as exc:
                         failures += 1
                         store.append("preflight_failure", dict(run_id=run_id, note_id=note["note_id"], error=str(exc)))
-                        print(f"BLOCKED {note['note_id']}: {exc}"); continue
+                        print(f"BLOCKED {note['note_id']}: {exc}", flush=True); continue
                     if any(reason.startswith("Last request preparation failed:") for reason in note["review_reasons"]):
                         store.append("preflight_ready", dict(run_id=run_id, note_id=note["note_id"]))
                     result, cached = transcribe(store, note, request, config,
                         lambda: Gemini(config, api_key(args.env_file)), fresh=args.fresh,
-                        retry_interrupted=args.retry_interrupted, pending_only=args.pending, run_id=run_id)
+                        retry_interrupted=args.retry_interrupted, pending_only=args.pending, run_id=run_id,
+                        progress=lambda message: print_progress("  " + message))
                     if cached:
                         store.append("reuse", dict(run_id=run_id, note_id=note["note_id"], revision_id=result["revision_id"],
                                                  attempt_ids=result["attempt_ids"]))
-                    reused += int(cached); failures += int(result["execution"] != "complete")
-                    print(f"{note['note_id']}: {result['execution']}" + (" (reused; zero new requests)" if cached else ""))
+                    complete = result["execution"] == "complete"
+                    completed += int(complete)
+                    reused += int(cached); failures += int(not complete)
+                    print(f"{note['note_id']}: {result['execution']}" + (" (reused; zero new requests)" if cached else ""),
+                          flush=True)
                     if result["execution"] != "complete":
                         for error in result.get("errors", []):
-                            print("  ERROR: " + error)
+                            print("  ERROR: " + error, flush=True)
+                    print_progress("  Updating saved reports.")
                     export_all(store, inventory, args.output, load_file(args.mapping) if args.mapping else None)
                     if result.get("stop_batch"):
-                        print("Batch stopped. Remaining notes were not attempted. Saved results and errors are retained.")
+                        print("Batch stopped. Remaining notes were not attempted. Saved results and errors are retained.",
+                              flush=True)
                         break
+                print_progress("Finishing reports.")
                 export_all(store, inventory, args.output, load_file(args.mapping) if args.mapping else None)
             finally:
                 summary = dict(usage_summary(store, run_id), run_id=run_id, reused_results=reused, failures=failures)
                 store.append("run_end", summary)
-                print(json.dumps(summary, ensure_ascii=False))
+                print_progress(f"Run ended in {time.monotonic() - started:.1f}s. {completed:,}/{len(selected):,} cards complete. "
+                               f"{summary['attempts']:,} new API attempts.")
+                print(json.dumps(summary, ensure_ascii=False), flush=True)
             return int(bool(failures))
     return 0
 

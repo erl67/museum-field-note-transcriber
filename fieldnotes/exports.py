@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 from .catalogue import authorities, note_number_key
+from .card_backs import card_side
 from .paths import inside, separate_from_sources
 from .review import current_records
 from .schema import ARRAYS, usable_date
@@ -34,7 +35,10 @@ def collector_filename(collector):
 
 def reading(record, images):
     cat, doc = record["catalogue"], record["document"]
-    lines = [cat["title"], "=" * 72, "Collector: " + cat["collector"] + " (" + cat["collector_basis"] + ")", ""]
+    lines = [cat["title"], "=" * 72, "Collector: " + cat["collector"] + " (" + cat["collector_basis"] + ")"]
+    if cat["scan_sets"]:
+        lines.append("Scan set: " + ", ".join(cat["scan_sets"]))
+    lines.append("")
     if doc:
         if record["stale_source"]:
             lines += ["EARLIER READING — source contents or page order changed.", ""]
@@ -67,7 +71,10 @@ def reading(record, images):
     lines += ["", "STAFF RECORD", "Stable note ID: " + record["note_id"],
               f"Discovery: {record['discovery']} | Grouping: {record['grouping']} | Execution: {record['execution']}",
               f"Metadata review: {record['metadata_review']} | Transcription review: {record['transcription_review']}"]
-    lines += ["Current source: " + images[iid]["path"] for iid in record["image_ids"]]
+    for position, iid in enumerate(record["image_ids"], 1):
+        side = card_side(record, position)
+        label = f"Current source ({side})" if side else "Current source"
+        lines.append(label + ": " + images[iid]["path"])
     if record["review_reasons"]:
         lines += ["Review notes:", *["- " + r for r in record["review_reasons"]]]
     return "\n".join(lines) + "\n"
@@ -84,6 +91,9 @@ def viewer_note(record, images, mapping, number_order):
         current = images.get(iid, {})
         row = deepcopy(current)
         row.update(order=order, image_id=iid)
+        side = item.get("side") if record["stale_source"] else card_side(record, order)
+        if side:
+            row["side"] = side
         if record["stale_source"]:
             row.update(path=item["path"], filename=Path(item["path"]).name,
                        sha256=item["original_sha256"], size=item["original_bytes"], status="stale_source")
@@ -133,6 +143,7 @@ def export_all(store, inventory, output, mapping=None):
         if record["active"]:
             combined.append(text); collector_text[cat["collector_folder"]].append(text)
         catalogue.append(dict(note_id=nid, active=record["active"], collector_folder=cat["collector_folder"],
+                              scan_sets="; ".join(cat["scan_sets"]),
                               collector_display=cat["collector"], species_display=cat["species"],
                               numbers_display=cat["number_label"], discovery=record["discovery"], grouping=record["grouping"],
                               execution=record["execution"], metadata_review=record["metadata_review"],
@@ -140,7 +151,7 @@ def export_all(store, inventory, output, mapping=None):
                               summary=doc["summary"] if doc else "", report_path="readable/" + nid + ".txt"))
         for position, iid in enumerate(record["image_ids"], 1):
             item = images[iid]
-            image_rows.append(dict(note_id=nid, image_id=iid, order=position,
+            image_rows.append(dict(note_id=nid, image_id=iid, order=position, side=card_side(record, position),
                                    **{k: item.get(k) for k in ("path", "filename", "folder", "status", "sha256", "size")},
                                    width=(item.get("dimensions") or [None, None])[0], height=(item.get("dimensions") or [None, None])[1]))
         if doc:
@@ -158,9 +169,9 @@ def export_all(store, inventory, output, mapping=None):
                     evidence_rows.append(dict(note_id=nid, field=key, item_index=index, image_id=ev["image_id"],
                                               entry_id=ev.get("entry_id") or item.get("entry_id"), quote=ev.get("quote"), location=ev.get("location")))
         bundle.append(viewer_note(record, images, mapping["images"], order[nid]))
-    fields = ["note_id", "active", "collector_folder", "collector_display", "species_display", "numbers_display", "discovery", "grouping", "execution", "metadata_review", "transcription_review", "page_count", "summary", "report_path"]
+    fields = ["note_id", "active", "collector_folder", "collector_display", "species_display", "numbers_display", "discovery", "grouping", "execution", "metadata_review", "transcription_review", "page_count", "summary", "report_path", "scan_sets"]
     write_csv(output / "catalogue.csv", fields, catalogue)
-    write_csv(output / "images.csv", ["note_id", "image_id", "order", "path", "filename", "folder", "status", "sha256", "size", "width", "height"], image_rows)
+    write_csv(output / "images.csv", ["note_id", "image_id", "order", "path", "filename", "folder", "status", "sha256", "size", "width", "height", "side"], image_rows)
     write_csv(output / "entries.csv", ["note_id", "entry_id", "image_id", "label"], entry_rows)
     write_csv(output / "evidence.csv", ["note_id", "field", "item_index", "image_id", "entry_id", "quote", "location"], evidence_rows)
     for key, rows in repeated.items():

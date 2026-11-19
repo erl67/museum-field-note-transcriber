@@ -10,14 +10,109 @@ function many() {
   b.notes.push({ ...structuredClone(n), note_id:id('note',2),number_order:1,catalogue:{...n.catalogue,collector:'Avery',collector_folder:'Avery'} });
   return seal(b);
 }
+test('numeric searches include range members and highlight the original text on its evidence page', () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, '../../test/inputs/catalogue-ranges.json'), 'utf8'));
+  const api = context().sandbox;
+  for (const [raw, yes, no] of cases) for (const query of [...yes, ...no]) {
+    assert.equal(api.numberMatches_([raw], query).length > 0, yes.includes(query), raw + ' / ' + query);
+  }
+  const bundle = fixture(), note = bundle.notes[0], first = note.pages[0];
+  note.catalogue.numbers = ['8419-20', '8429'];
+  note.catalogue.number_label = '8419-20, 8429';
+  note.identifiers = [{ value: '8419-20', evidence: [{ image_id: first.image_id }] }];
+  first.text = 'First (8419 – 20) <source> 8429.';
+  note.pages[1].text = 'Another reference (8419 – 20)';
+  const publicApi = context(bundle, { publicMode: true }).sandbox;
+  for (const [query, expected] of [['8420', '8419 – 20'], ['8419', '8419']]) {
+    const row = publicApi.listFolders({ number: query }).folders[0].notes[0];
+    assert.equal(row.catalogue.number_label, '8419-20, 8429');
+    const f = frontend(), loaded = publicApi.loadNote(row.note_id, { number: query });
+    f.sandbox.renderNote(loaded);
+    const marks = nodes(f.ids.record).filter(n => n.tag === 'mark');
+    assert.deepEqual(marks.map(n => n.textContent), [expected]);
+    const source = nodes(f.ids.record).find(n => n.tag === 'pre');
+    assert.equal(source.children.map(n => n.textContent).join(''), first.text);
+  }
+  first.text += ' Elevation 8421.';
+  const updated = context(bundle).sandbox;
+  assert.equal(updated.listFolders({ query: '8421' }).total, 1);
+  assert.equal(updated.listFolders({ number: '8421' }).total, 0);
+  const browser = frontend();
+  browser.ids.query.value = '8420'; browser.ids.search.events.submit({preventDefault(){}});
+  assert.equal(browser.catalogueCalls.at(-1).context.number, '8420');
+});
 test('base stylesheet is verbatim and client embedding is current',()=>{
   const css=fs.readFileSync(path.join(__dirname,'reference.css'),'utf8');
   assert.equal(html.match(/<style>([\s\S]*?)<\/style>/)[1],css);
-  assert.equal(sha(css),'47bbfecd8f0f1793e7407c96322992814fb56c17e0dad82373c7eb011a4e2ee2');
+  assert.equal(sha(css),'82ddc4e76fa105bad5668707e73d20d5e33448771567c9b0197aa58185be4804');
   assert.equal(html.replace(/\r\n/g,'\n').match(/<script>\n([\s\S]*?)\n  <\/script>/)[1],
     fs.readFileSync(path.join(__dirname,'client.js'),'utf8').replace(/\r\n/g,'\n'));
-  assert.match(html,/grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(css,/--scan-share: 47fr; --text-share: 53fr/);
   assert.match(html,/@media \(max-width: 760px\)/); assert.match(html,/object-fit: contain/);
+});
+test('exact scan sets work across older exports, listing, navigation and public selection', () => {
+  const bundle = many();
+  for (const [index, note] of bundle.notes.entries()) {
+    const folder = index ? 'Carriker/set10' : 'Carriker/set1';
+    Object.assign(note.catalogue, { collector: 'Carriker', collector_folder: 'Carriker' });
+    for (const scan of note.scans) {
+      scan.image_id = id('img', scan.order + index * 10);
+      scan.path = folder + '/' + scan.filename;
+      scan.folder = folder;
+    }
+    note.pages.forEach((page, i) => { page.image_id = note.scans[i].image_id; });
+  }
+  const api = context(bundle).sandbox, f = frontend({ set: 'Carriker/set1' });
+  const result = api.listFolders(f.catalogueCalls[0].context);
+  assert.deepEqual([...result.sets], ['Carriker/set1', 'Carriker/set10']);
+  assert.equal(result.total, 1);
+  f.catalogueCalls[0].success(result);
+  assert.equal(f.ids.message.textContent, '1 note in 1 collector folder');
+  assert.equal(f.ids['set-filter'].value, 'Carriker/set1');
+  const link = nodes(f.ids.results).find(n => n.tag === 'a');
+  assert.ok(link.href.includes('set=Carriker%2Fset1'));
+  const loaded = api.loadNote(bundle.notes[0].note_id, { set: 'Carriker/set1' });
+  assert.equal(loaded.navigation.total, 1);
+  assert.equal(loaded.navigation.next, null);
+  f.ids['clear-search'].events.click();
+  assert.equal(f.catalogueCalls.at(-1).context.set, '');
+  const published = context(bundle, { publicMode: true, allowlist: [bundle.notes[0].note_id] }).sandbox;
+  assert.deepEqual([...published.listFolders({}).sets], ['Carriker/set1']);
+  assert.equal(published.listFolders({ set: 'Carriker/set10' }).total, 0);
+});
+test('only explicit sides are labelled and 72-character lines widen the whole note', () => {
+  const bundle = fixture(), note = bundle.notes[0], f = frontend();
+  note.scans[0].side = 'Front'; note.scans[1].side = 'Back';
+  function render() { f.sandbox.renderNote(context(bundle).sandbox.loadNote(note.note_id, {})); }
+  note.pages[0].text = 'x'.repeat(71) + '  \r\nshort';
+  render();
+  assert.equal(f.ids.record.dataset.wideTranscription, 'false');
+  assert.match(text(f.ids.record), /Page 1 · Front/); assert.match(text(f.ids.record), /Page 2 · Back/);
+  for (const field of [note.pages[0], { kind: 'addition' }, { image_id: note.pages[1].image_id, language: 'English' }]) {
+    field.text = 'x'.repeat(72);
+    if (field.kind) note.pages[1].annotations = [field];
+    if (field.language) note.translations = [field];
+    render();
+    assert.equal(f.ids.record.dataset.wideTranscription, 'true');
+    field.text = 'short';
+  }
+  render();
+  assert.equal(f.ids.record.dataset.wideTranscription, 'false');
+});
+test('public copy link uses this note and deployment, with a manual clipboard fallback', async () => {
+  const bundle = fixture(), nid = bundle.notes[0].note_id, f = frontend({ query: 'private search' });
+  f.sandbox.renderNote(context(bundle).sandbox.loadNote(nid, {}));
+  assert.ok(!nodes(f.ids.record).some(n => n.textContent === 'Copy note link'));
+  f.sandbox.renderNote(context(bundle, { publicMode: true }).sandbox.loadNote(nid, {}));
+  const share = nodes(f.ids.record).find(n => n.className === 'letter-share');
+  const [button, status, input] = share.children;
+  await button.events.click();
+  assert.ok(input.focused && input.selected && !input.hidden);
+  assert.equal(input.value, 'https://script.google.com/synthetic/exec?note=' + nid);
+  let copied;
+  f.sandbox.navigator = { clipboard: { writeText: async value => { copied = value; } } };
+  await button.events.click();
+  assert.equal(copied, input.value); assert.ok(input.hidden); assert.equal(status.textContent, 'Link copied.');
 });
 test('installation is blank restricted and Drive read-only',()=>{
   const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'appsscript.json')));
