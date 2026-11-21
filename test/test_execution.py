@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 import httpx
 from fieldnotes.execution import Quota, QuotaReached, error_policy, transcribe
+from fieldnotes.config import Config, load_config
 from fieldnotes.exports import export_all
 from fieldnotes.provider import Gemini, api_key
 from fieldnotes.storage import atomic_json, encoded, lock, read_json
@@ -48,7 +49,7 @@ class ExecutionTests(Workspace):
         send = fake.send
 
         def send_after_progress(request, prompt):
-            self.assertIn(f"Gemini request {len(fake.calls) + 1}/3", messages[-1])
+            self.assertIn(f"Gemini request {len(fake.calls) + 1}/{self.config.attempts}", messages[-1])
             self.assertIn(f"Daily attempts {len(fake.calls) + 1}/500", messages[-1])
             return send(request, prompt)
 
@@ -57,7 +58,7 @@ class ExecutionTests(Workspace):
             self.clock.sleep(duration)
 
         self.quota.sleep = wait_after_progress
-        with patch.object(fake, "send", side_effect=send_after_progress):
+        with patch.object(fake, "send", side_effect=send_after_progress), patch("fieldnotes.execution.random.uniform", return_value=0):
             result, _ = transcribe(self.store, self.note, self.request, self.config, lambda: fake,
                                    quota=self.quota, sleep=wait_after_progress, progress=messages.append)
         self.assertEqual(result["execution"], "complete")
@@ -67,6 +68,64 @@ class ExecutionTests(Workspace):
         self.assertIsNone(ends[0]["usage"]["total"])
         self.assertGreater(sum(self.clock.waits), 29)
         self.assertTrue(any("Gemini responded" in message and "160 tokens" in message for message in messages))
+
+    def test_overload_retries_wait_minutes_and_recover_on_fifth_attempt(self):
+        messages = []
+        with patch("fieldnotes.execution.random.uniform", return_value=0):
+            result, _, fake = self.execute([ServiceError(503)] * 4 + [response(self.doc)], progress=messages.append)
+        self.assertEqual(result["execution"], "complete")
+        self.assertEqual(len(fake.calls), 5)
+        self.assertAlmostEqual(sum(self.clock.waits), 900.1, places=5)
+        for delay in (60, 120, 240, 480):
+            self.assertTrue(any(f"Retrying in {delay:.1f}s" in message for message in messages))
+        self.assertTrue(any("Retry wait: 420.0s remaining" in message for message in messages))
+        self.assertEqual(len([e for e in self.store.events() if e["kind"] == "attempt_end"]), 5)
+        self.assertEqual(read_json(self.config.quota_file)["models"]["gemini/" + self.config.model]["attempts"], 5)
+
+    def test_persistent_overload_still_has_a_finite_attempt_budget(self):
+        messages = []
+        with patch("fieldnotes.execution.random.uniform", return_value=0):
+            result, _, fake = self.execute([ServiceError(503)] * 6, progress=messages.append)
+        self.assertEqual(result["execution"], "failed")
+        self.assertTrue(result["stop_batch"])
+        self.assertEqual(len(fake.calls), 5)
+        self.assertIn("exhausted 5 attempts", " ".join(result["errors"]))
+        self.assertEqual(sum("Gemini request failed after" in message for message in messages), 5)
+
+    def test_retry_wait_respects_server_hint_and_caps_jitter(self):
+        self.config = replace(self.config, max_retry_wait=120)
+        with patch("fieldnotes.execution.random.uniform", return_value=5):
+            result, _, _ = self.execute([ServiceError(503, headers={"Retry-After": "90"}),
+                                        ServiceError(503), response(self.doc)])
+        self.assertEqual(result["execution"], "complete")
+        self.assertEqual(sum(self.clock.waits), 215)  # 95 + 120, including jitter.
+
+    def test_interrupt_during_backoff_keeps_known_failure_and_allows_resume(self):
+        fake = FakeTransport([ServiceError(503)])
+        with self.assertRaises(KeyboardInterrupt):
+            transcribe(self.store, self.note, self.request, self.config, lambda: fake,
+                       quota=self.quota, sleep=lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
+        self.assertEqual(self.store.results()[-1]["execution"], "failed")
+        self.assertTrue(fake.closed)
+        result, _, resumed = self.execute([response(self.doc)], pending_only=True)
+        self.assertEqual(result["execution"], "complete")
+        self.assertEqual(len(resumed.calls), 1)
+        self.assertIsNone(self.store.latest("retry_acknowledged"))
+
+    def test_daily_cap_still_stops_a_service_retry(self):
+        self.config = replace(self.config, daily_limit=1)
+        self.quota = Quota(self.config, self.clock.time, self.clock.sleep)
+        result, _, fake = self.execute([ServiceError(503), response(self.doc)])
+        self.assertEqual(result["execution"], "paused")
+        self.assertTrue(result["stop_batch"])
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_retry_defaults_match_example_and_reject_invalid_base(self):
+        example = Path(__file__).resolve().parents[1] / "docs/config.example.json"
+        self.assertEqual(load_config(example), Config())
+        for value in (0, -1, float("inf"), float("nan"), True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                Config(retry_base=value)
 
     def test_format_correction_bounded_and_preserves_all_responses(self):
         bad = response(self.doc)

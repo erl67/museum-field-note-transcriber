@@ -18,7 +18,7 @@ from .provider import Gemini, api_key
 from .publication import generated_paths, publish
 from .review import apply_authority, apply_review, current_records
 from .storage import Store, identity, lock, read_json
-from .usage import aggregate, read_usage
+from .usage import aggregate, read_usage, reported_usage
 
 
 def parser():
@@ -95,8 +95,9 @@ def usage_summary(store, run_id=None):
     starts = {e["data"]["attempt_id"] for e in events if e["kind"] == "attempt_start"
               and (not run_id or e["data"]["run_id"] == run_id)}
     calls = [e["data"] for e in events if e["kind"] == "attempt_end" and e["data"]["attempt_id"] in starts]
+    counted = calls + [{"usage": read_usage(None)}] * (len(starts) - len(calls))
     report = dict(scope=run_id or "historical attempts", attempts=len(starts), known_outcomes=len(calls),
-                usage=aggregate(calls + [{"usage": read_usage(None)}] * (len(starts) - len(calls))),
+                usage=aggregate(counted), reported_usage=reported_usage(counted),
                 costs=[c.get("cost") for c in calls], unknown_outcomes=len(starts) - len(calls))
     if run_id:
         reused = [e["data"] for e in events if e["kind"] == "reuse" and e["data"]["run_id"] == run_id]
@@ -104,7 +105,8 @@ def usage_summary(store, run_id=None):
         historical_ids = {aid for reuse in reused for aid in reuse["attempt_ids"]} - starts
         historical = [ended.get(aid, {"usage": read_usage(None)}) for aid in sorted(historical_ids)]
         report["reused_history"] = dict(revisions=[r["revision_id"] for r in reused], attempts=len(historical),
-                                        usage=aggregate(historical), costs=[c.get("cost") for c in historical])
+                                        usage=aggregate(historical), reported_usage=reported_usage(historical),
+                                        costs=[c.get("cost") for c in historical])
     return report
 
 
@@ -137,6 +139,18 @@ def print_progress(message):
     print(message, file=sys.stderr, flush=True)
 
 
+def print_usage(report):
+    total = report["reported_usage"]["total"]
+    tokens = f"{total['tokens']:,}" if total["tokens"] is not None else "unavailable"
+    print_progress(f"Reported tokens: {tokens} from {total['reported_attempts']:,}/{report['attempts']:,} attempts.")
+    if total["missing_attempts"]:
+        print_progress(f"Token counts unavailable for {total['missing_attempts']:,} attempts. "
+                       "Reported tokens are a subtotal; the full run total is unknown.")
+    if any(cost is None for cost in report["costs"]):
+        print_progress("Some cost estimates are unavailable (missing token counts or configured prices). "
+                       "JSON null means unknown, not zero.")
+
+
 def run(args):
     if args.command == "transcribe":
         started = time.monotonic()
@@ -150,7 +164,9 @@ def run(args):
         if destination.is_relative_to(output) or output.is_relative_to(destination):
             raise ValueError("Keep ordinary exports and the managed publication destination in separate directories")
     if args.command == "usage":
-        print(json.dumps(usage_summary(store, args.run), ensure_ascii=False, indent=2)); return 0
+        report = usage_summary(store, args.run)
+        print_usage(report)
+        print(json.dumps(report, ensure_ascii=False, indent=2)); return 0
     if args.command == "dry-run":
         previous = store.latest("inventory")
         overrides = load_file(args.overrides) if args.overrides else None
@@ -280,6 +296,7 @@ def run(args):
                 store.append("run_end", summary)
                 print_progress(f"Run ended in {time.monotonic() - started:.1f}s. {completed:,}/{len(selected):,} cards complete. "
                                f"{summary['attempts']:,} new API attempts.")
+                print_usage(summary)
                 print(json.dumps(summary, ensure_ascii=False), flush=True)
             return int(bool(failures))
     return 0

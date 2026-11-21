@@ -4,6 +4,7 @@ from email.utils import parsedate_to_datetime
 import json
 import math
 from pathlib import Path
+import random
 import time
 from zoneinfo import ZoneInfo
 from . import __version__
@@ -187,6 +188,10 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
             except QuotaReached as exc:
                 outcome.update(execution="paused", errors=[str(exc)], stop_batch=True)
                 break
+            except (KeyboardInterrupt, SystemExit):
+                if ids:
+                    checkpoint_result(store, note, request, outcome, ids, run_id)
+                raise
             progress(f"Gemini request {index + 1}/{config.attempts}. Daily attempts "
                      f"{daily_count:,}/{config.daily_limit:,}. Waiting for Gemini (timeout {config.timeout:g}s).")
             aid = identity("att_")
@@ -235,6 +240,7 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                 corrections += 1
                 prompt = request["provenance"]["prompt"] + correction(outcome["errors"])
             else:
+                progress(f"Gemini request failed after {elapsed:.1f}s. {failure}")
                 outcome.update(errors=[f"{kind}: {failure}"], execution="failed")
                 if kind in {"daily", "billing", "configuration", "authentication/access", "model/endpoint unavailable"}:
                     if kind == "daily":
@@ -250,16 +256,26 @@ def transcribe(store, note, request, config, transport_factory, *, fresh=False,
                     break
                 if index == config.attempts - 1:
                     outcome["stop_batch"] = True
-                delay = max(delay, min(60, 5 * 2 ** index))
+                    outcome["errors"].append(f"Temporary service errors exhausted {config.attempts} attempts for this card. "
+                                             "Saved work is retained; resume with --pending later.")
+                delay = min(config.max_retry_wait,
+                            max(delay, config.retry_base * 2 ** index) + random.uniform(0, 5))
             if index < config.attempts - 1:
                 if response is not None:
                     progress("Response format needs correction. Retrying the request with formatting instructions.")
                 else:
-                    progress(f"Gemini request failed after {elapsed:.1f}s. {failure}")
                     progress(f"Retrying in {delay:.1f}s. Request pacing still applies.")
-                while delay > 0:
-                    sleep(min(60, delay))
-                    delay -= min(60, delay)
+                try:
+                    while delay > 0:
+                        sleep(min(60, delay))
+                        delay -= min(60, delay)
+                        if delay > 0:
+                            progress(f"Retry wait: {delay:.1f}s remaining. Press Ctrl+C to stop; saved work is retained.")
+                except (KeyboardInterrupt, SystemExit):
+                    # The last request ended before this wait. Preserve its known
+                    # outcome so resumption does not need an interrupted-call retry.
+                    checkpoint_result(store, note, request, outcome, ids, run_id)
+                    raise
         return checkpoint_result(store, note, request, outcome, ids, run_id), False
     finally:
         transport.close()

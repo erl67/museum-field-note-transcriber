@@ -19,12 +19,13 @@ class Config:
     max_request_bytes: int = 19_000_000
     max_pages: int = 40
     timeout: float = 180
-    attempts: int = 3
+    attempts: int = 5
     rpm: float = 1
     daily_limit: int = 500
     quota_timezone: str = "America/Los_Angeles"
     quota_file: str = "local/fieldnotes-quota.json"
-    max_retry_wait: float = 120
+    retry_base: float = 60
+    max_retry_wait: float = 600
     rates: dict | None = None
 
     def __post_init__(self):
@@ -42,7 +43,7 @@ class Config:
                 raise ValueError(f"{name} must be a positive integer")
         if type(self.max_edge) is not int or self.max_edge < 0:
             raise ValueError("max_edge must be a nonnegative integer")
-        for name in ("timeout", "rpm", "max_retry_wait"):
+        for name in ("timeout", "rpm", "retry_base", "max_retry_wait"):
             value = getattr(self, name)
             if type(value) not in (float, int) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite")

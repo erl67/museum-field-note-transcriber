@@ -2,7 +2,7 @@
 
 Staff can inventory scanned cards, transcribe selected notes, correct readings, and browse a collection by collector, species or collection number. Start with the JPEGs in the collector folders. An existing spreadsheet is optional.
 
-Each ordinary card starts as one provisional note. A recorded front and back become two ordered pages of the same note. A note keeps one permanent link even when its species or numbers change. One page can describe several specimens at different places. Each number and locality can point to its own passage in the complete page transcription. Missing species and undated notes stay in the catalogue.
+Each ordinary card starts as one provisional note. A recorded front and back become two ordered pages of the same note. A note keeps its ID even when its species or numbers change. One page can describe several specimens at different places. Each number and locality can point to its own passage in the complete page transcription. Missing species and undated notes stay in the catalogue.
 
 ## Start in PowerShell
 
@@ -51,7 +51,7 @@ $note = $listing.records[0].note_id
 
 Choose the intended row before using its ID for transcription. The examples use the first listed note for inspection. The collection number and species appear after a reading supplies them. Folder names are provisional collector attribution. Search covers every number, source name, approved alias, locality, date text, and saved transcription. Number order has no chronological meaning. The same number can occur in different collector folders.
 
-A digits-only catalogue search finds each card carrying that identifier, including members of a written range. For example, `8420` matches both `8419-20` and `8410-8430`. In the viewer, enter the number or append `?number=8420` to the viewer URL. Open a result to see all identifiers and pages on that card. The reader highlights the number where written, or the written range when the number is implied.
+A digits-only catalogue search finds each card carrying that identifier, including members of a written range. For example, `8420` matches both `8419-20` and `8410-8430`.
 
 Open `local/exports/catalogue.csv` to browse all records. Import identifiers as **Text** to retain leading zeros. Open `local/exports/combined.txt` to read the collection in one file. For a single card, use `local/exports/readable/<note_id>.txt` or `details/<note_id>.txt` for the evidence and provenance. Rebuild the reports and viewer JSON with `export`, even when the scan drive is disconnected. See [outputs and publication](docs/outputs.md).
 
@@ -78,6 +78,8 @@ Cards are processed by collector folder, then set (`set1`, `set2`, …), then sc
 
 Count one initial request per card, including a card with two scans. Retries and format corrections each use another attempt. The default daily limit is 500 attempts per Pacific day, matching the operator's specified allocation. At the cap the batch saves its progress and stops. Rerun the same `--pending` selection after midnight Pacific to continue.
 
+For temporary service errors such as HTTP 503, the default allows five attempts per card with waits of approximately 1, 2, 4 and 8 minutes. The CLI reports progress during those waits. Persistent service errors still stop the batch after that budget; saved cards remain complete. The final summary shows reported token subtotals even when failed requests supplied no counts. A JSON `null` means unknown, including costs without configured prices.
+
 ## Correct and share readings
 
 The saved service result, human corrections, and review decisions have separate histories. Completing a reading leaves metadata and transcription unreviewed. A correction updates titles and browse groups when reports are regenerated. Staff can approve a number while leaving the page text under review.
@@ -94,13 +96,17 @@ The saved service result, human corrections, and review decisions have separate 
 
 These are independent operations, each using a staff-prepared file. The review guide gives working file shapes, replacement rules and examples. [Human review, aliases and grouping](docs/review.md) · [Transcription record schema](docs/schema.md) · [Handwriting profiles](docs/handwriting.md)
 
-The read-only Apps Script viewer ships with blank Drive settings. Staff can try its collector and species views using invented cards on this computer.
+## Website reader
+
+Field notes will appear on the birds website alongside the egg-slip and correspondence readers. Work on the website reader is deferred while transcription continues. For now, use the local catalogue and reading files above to browse actual notes.
+
+The earlier Apps Script prototype remains available for an offline preview with invented cards.
 
 ```powershell
 & $py scripts/make_demo.py
 node scripts/preview.cjs
 ```
 
-Open [the local synthetic preview](http://127.0.0.1:8783/) while the command is running. Press Ctrl+C to stop it. Publishing to Drive is a separate operation. It writes one text file per set in the collector folder, such as `Carriker/set1.txt` and `Carriker/set2.txt`, and one JSON export for the viewer. [Viewer installation and access](apps_script/viewer/README.md) · [Managed publication](docs/outputs.md)
+Open [the local synthetic preview](http://127.0.0.1:8783/) while the command is running. Press Ctrl+C to stop it. See the [prototype notes](apps_script/viewer/README.md) and [guide to local exports and managed working copies](docs/outputs.md).
 
 For maintainers, see [offline tests and visual checks](docs/testing.md) and [project handoff, origins and collection inspection](docs/PROJECT_HANDOFF.md).

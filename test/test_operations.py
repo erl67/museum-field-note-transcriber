@@ -12,8 +12,8 @@ from fieldnotes.exports import export_all
 from fieldnotes.publication import publish, generated_paths
 from fieldnotes.review import current_records
 from fieldnotes.storage import atomic_json, digest, encoded, Store
-from fieldnotes.usage import read_usage, aggregate, estimate
-from .helpers import Workspace, Clock, FakeTransport, response, rich_document, jpeg
+from fieldnotes.usage import read_usage, aggregate, estimate, reported_usage
+from .helpers import Workspace, Clock, FakeTransport, ServiceError, response, rich_document, jpeg
 
 
 class CliTests(Workspace):
@@ -81,6 +81,29 @@ class CliTests(Workspace):
         self.assertEqual(code,0);self.assertEqual(Path(self.config.quota_file).read_bytes(),before)
         self.assertIn('"attempts": 0',text)
 
+    def test_batch_continues_after_extended_overload_retry(self):
+        for name in ("C/a.jpg", "C/b.jpg"):
+            jpeg(self.inputs / name)
+        inventory = discover(self.inputs)
+        self.store.append("inventory", inventory)
+        first, second = inventory["notes"]
+        fake = FakeTransport([ServiceError(503)] * 4 + [response(rich_document(n["image_ids"]))
+                                                       for n in (first, second)])
+        clock = Clock()
+        def execute(*args, **kwargs):
+            return transcribe(*args, **kwargs, sleep=clock.sleep,
+                              quota=Quota(self.config, clock.time, clock.sleep))
+        with patch("fieldnotes.cli.load_config", return_value=self.config), \
+             patch("fieldnotes.cli.api_key", return_value="dummy"), patch("fieldnotes.cli.Gemini", return_value=fake), \
+             patch("fieldnotes.cli.transcribe", side_effect=execute):
+            code, message = self.call("transcribe", "--pending", "--output", str(self.root / "exports"))
+        self.assertEqual(code, 0, message)
+        self.assertIn("2/2 cards complete", message)
+        self.assertIn("Reported tokens: 320 from 2/6 attempts", message)
+        self.assertIn("Token counts unavailable for 4 attempts", message)
+        self.assertEqual(len(fake.calls), 6)
+        self.assertEqual([r["execution"] for r in self.store.results()], ["complete", "complete"])
+
     def test_transcription_follows_scan_order_and_preserves_whole_notes(self):
         groups = json.loads((Path(__file__).parent / "inputs/scan-order.json").read_text(encoding="utf-8"))
         for group in groups:
@@ -146,7 +169,7 @@ class CliTests(Workspace):
             self.assertIn("Model gemini-3.5-flash-lite", message)
             self.assertIn("Daily limit 500 attempts", message)
             self.assertIn("[1/2] Preparing scans from C/set1 (front.jpg, back.jpg)", message)
-            self.assertIn("Gemini request 1/3. Daily attempts 500/500", message)
+            self.assertIn("Gemini request 1/5. Daily attempts 500/500", message)
             self.assertIn("Updating saved reports", message)
             self.assertIn("1/2 cards complete", message)
             self.assertEqual(json.loads(message.splitlines()[-1])["attempts"], 1)
@@ -345,6 +368,32 @@ class UsageTests(Workspace):
         self.assertTrue(all(v is None for v in read_usage({}).values()))
         self.assertIsNone(aggregate([{'usage':read_usage(response({}))},{'usage':read_usage({})}])['total'])
         self.assertIsNone(estimate(read_usage({}),'example',None))
+    def test_reported_usage_keeps_subtotals_and_counts_missing_fields(self):
+        partial = read_usage(response({}))
+        partial["cached"] = None
+        totals = reported_usage([{"usage": partial}, {"usage": read_usage({})}, {"usage": read_usage(response({}))}])
+        self.assertEqual(totals["total"], dict(tokens=320, reported_attempts=2, missing_attempts=1))
+        self.assertEqual(totals["cached"], dict(tokens=20, reported_attempts=1, missing_attempts=2))
+        self.assertEqual(reported_usage([])["total"], dict(tokens=0, reported_attempts=0, missing_attempts=0))
+        self.assertIsNone(reported_usage([{}])["total"]["tokens"])
+    def test_saved_run_usage_displays_known_subtotal_with_unfinished_attempt(self):
+        self.setup_note(names=["C/a.jpg"])
+        result = self.save()
+        self.store.append("attempt_start", dict(attempt_id="att_unfinished", note_id=self.note["note_id"],
+                          fingerprint=self.request["fingerprint"], run_id=result["run_id"]))
+        report = usage_summary(self.store, result["run_id"])
+        self.assertEqual(report["attempts"], 2)
+        self.assertEqual(report["unknown_outcomes"], 1)
+        self.assertIsNone(report["usage"]["total"])
+        self.assertEqual(report["reported_usage"]["total"], dict(tokens=160, reported_attempts=1, missing_attempts=1))
+        output, messages = StringIO(), StringIO()
+        with redirect_stdout(output), redirect_stderr(messages):
+            code = main(["--store", str(self.store.root), "usage", "--run", result["run_id"]])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), report)
+        self.assertIn("Reported tokens: 160 from 1/2 attempts", messages.getvalue())
+        self.assertIn("subtotal", messages.getvalue())
+        self.assertIn("null means unknown, not zero", messages.getvalue())
     def test_cost_requires_explicit_dated_matching_assumptions(self):
         rates=dict(currency='USD',model='example',as_of='2026-11-17',source='Synthetic test assumption, not billing',input=1,cached=.1,output=2)
         result=estimate(read_usage(response({})),'example',rates)

@@ -1,4 +1,6 @@
-# Field Notes viewer
+# Field Notes viewer prototype
+
+This directory preserves the earlier Apps Script prototype and its offline tests. The planned public reader will be part of the birds website alongside the egg-slip and correspondence readers. The Drive configuration and deployment details below describe the prototype. See the [website reader decision](../../docs/PROJECT_HANDOFF.md#november-20-website-reader-decision).
 
 The viewer reads one saved export and loads each JPEG on demand from Google Drive. Its search, species groups, reader pages and scan enlargement use saved data. No service key is needed. The checked-in installation is restricted to the configuring user, has blank IDs, and has no deployment URL.
 
@@ -13,7 +15,7 @@ node scripts/preview.cjs
 
 Open [the local preview](http://127.0.0.1:8783/). It serves the actual template and server functions against a simulated Drive containing only the invented fixture. Try searching `12a`, opening the two-page note, enlarging either scan, and returning to species browsing. Ctrl+C stops the preview.
 
-## Set up a restricted installation when authorized
+## Historical prototype configuration
 
 1. Prepare the local bundle with `& $py -m fieldnotes export`. The file is `local/exports/Field_notes_viewer.json`. Keep this file private. It can include full prompts, review reasons and partial service text.
 2. Place the approved export in a controlled Drive location using the documented publication operation or an authorized file transfer. Identify its actual Drive **file ID**. Identify a staff access-gate file and, for path-based scan lookup, the actual **folder ID** for the Field Notes root containing the collector folders. Use the relevant Drive item's URL to obtain its ID.
@@ -53,7 +55,7 @@ Supply the same `--mapping` on each export or publication that should use it. An
 
 Export size is limited to 10 MiB. A JPEG is limited to 12 MiB and a note to 24 MiB of scanned files for browser loading. Every page is positioned before scans load, and requests for images run sequentially. The desktop panels show the full image at its own aspect ratio. The reference mobile breakpoint stacks the scan above its text. “Enlarge scan” opens the verified image at natural dimensions in a scrollable dialog.
 
-## Public deployment is a separate disclosure decision
+## Prototype public access model
 
 An owner-executed public deployment uses the owner's Drive permissions. It can disclose private scans and text to visitors who have no Drive access. Before choosing it, prepare a separate approved private export snapshot, review the actual pages, annotations, summaries, editorial notes, filenames, evidence and translations, and choose the note IDs suitable for disclosure. Later changes to approved IDs' contents also need review.
 

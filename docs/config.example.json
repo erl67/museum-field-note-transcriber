@@ -8,11 +8,12 @@
   "max_request_bytes": 19000000,
   "max_pages": 40,
   "timeout": 180,
-  "attempts": 3,
+  "attempts": 5,
   "rpm": 1,
   "daily_limit": 500,
   "quota_timezone": "America/Los_Angeles",
   "quota_file": "local/fieldnotes-quota.json",
-  "max_retry_wait": 120,
+  "retry_base": 60,
+  "max_retry_wait": 600,
   "rates": null
 }

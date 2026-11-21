@@ -31,3 +31,14 @@ def aggregate(attempts):
     fields = ("input", "output", "reasoning", "cached", "total")
     return {key: sum(a["usage"][key] for a in attempts)
             if all(a.get("usage", {}).get(key) is not None for a in attempts) else None for key in fields}
+
+
+def reported_usage(attempts):
+    """Show known subtotals and coverage without inventing missing token counts."""
+    report = {}
+    for key in ("input", "output", "reasoning", "cached", "total"):
+        values = [a.get("usage", {}).get(key) for a in attempts]
+        known = [value for value in values if value is not None]
+        report[key] = dict(tokens=sum(known) if known or not values else None,
+                           reported_attempts=len(known), missing_attempts=len(values) - len(known))
+    return report

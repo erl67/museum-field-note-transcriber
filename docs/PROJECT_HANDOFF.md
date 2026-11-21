@@ -1,4 +1,20 @@
-# Project handoff · November 18, 2026
+# Project handoff · November 21, 2026
+
+## November 21 service retries and usage feedback
+
+Compared the current egg-slip transport and saved field-note attempts without submitting requests. Both use the same configured Gemini model, 180-second timeout, high thinking and ordered inline JPEGs. Field notes requests structured JSON; egg slips request plain text. The saved 503 high-demand errors arrived well before the client timeout. The egg-slip profile allowed five attempts while field notes allowed three.
+
+Field notes now defaults to five total attempts with transient-error backoff of approximately 1, 2, 4 and 8 minutes, small random jitter and a configurable 600-second wait cap. Wait progress appears at least once per minute. Persistent service failures, excessive server-directed waits, authentication/settings errors and exhausted quotas still stop the batch. Every submission remains counted by the one execution layer against the unchanged 500-attempt daily allocation. Ctrl+C during backoff/pacing saves the known previous outcome; interruption in a request retains the explicit acknowledgment requirement. No generation settings or transcription prompt were changed.
+
+Usage reports now retain strict unknown totals and add reported subtotals with per-counter coverage. The CLI explains missing usage and cost estimates in plain text. These summaries work on earlier saved journals without rewriting them. Verification: 131 Python tests ran successfully (130 passed, one optional mounted-source test skipped), plus all 40 Node viewer tests. Tests cover recovery after four 503s and continuation to the next card, finite attempts, server waits, cancellation, daily limits and partially reported token usage. Live availability has not been tested. Existing November 20 website-reader documentation changes were preserved.
+
+## November 20 website reader decision
+
+The public field-note reader belongs in `ericlaslo-website`, alongside the egg-slip and correspondence readers. Transcription is still in progress. Website implementation is deferred. The Apps Script viewer in this repository is an earlier prototype for reference and offline tests.
+
+The website checkout has two relevant guides. `EGG-READER.md` describes how the site stages scans and readings for lookup by E-number or species and browsing by family. `CORRESPONDENCE.md` describes how it turns a private working export and ordered JPEGs into a public catalogue with individual letter links. For field notes, the corresponding identifiers are the stable `note_id` for the whole card and its ordered image IDs for the pages. The public URL and website data format are still open.
+
+## November 18 local application
 
 The first field-note application is usable locally. Staff can inventory original JPEGs, inspect a read-only dry run, transcribe a selected batch when authorized, review the resulting pages and metadata, and regenerate a catalogue, reading files and Drive viewer bundle offline. An explicit publication operation manages its own outputs. This implementation used no live transcription, Drive publication, sharing change or deployment.
 
@@ -61,6 +77,6 @@ On November 18, **118 Python tests and 40 Node viewer tests passed**, including 
 
 Local Edge rendered both current templates with identical invented scans at 1365 × 950 and 390 × 844. With a long source line, the desktop scan and text columns measured 592.7 and 668.3 CSS pixels. Mobile stacked the pages and preserved each image's proportions. Enlargement, keyboard dismissal, return navigation, collector/species filtering, Search and Show all passed. Screenshots and measurements are under `local/visual-check/`. The physical phones, live Apps Script frame and real Drive authentication were outside the offline check.
 
-Staff still need to authorize a service run, provide their key and account allocation, and review the historical readings. Real handwriting accuracy, actual billed usage and live model availability are unmeasured. The optional viewer requires real Drive file/folder IDs, access decisions and a deployment. The current implementation reads the local JSONL history and a bounded Drive bundle in full. Large collections may eventually need smaller viewer exports. Select a whole note or group within configured input limits. Preserve private backups of the journal and blobs before moving a store.
+The November 18 offline checks did not measure real handwriting accuracy, billed usage or live model availability. The local application reads the JSONL history in full. Select a whole note or group within configured input limits. Preserve private backups of the journal and blobs before moving a store.
 
-Start with the [staff guide](../README.md). For record formats and regeneration see [schema](schema.md), [review](review.md), [outputs](outputs.md), [tests](testing.md) and [viewer installation](../apps_script/viewer/README.md).
+Start with the [staff guide](../README.md). For record formats and regeneration see [schema](schema.md), [review](review.md), [outputs](outputs.md), [tests](testing.md) and the [viewer prototype](../apps_script/viewer/README.md).

@@ -1,5 +1,7 @@
 # Build the museum field-note transcription application
 
+> Historical build brief. The [November 20 website reader decision](PROJECT_HANDOFF.md#november-20-website-reader-decision) supersedes the Apps Script display and deployment requirements below.
+
 Build the first usable version of a historical museum field-note transcription application.
 Implement and test it; do not stop after producing a plan.
 
