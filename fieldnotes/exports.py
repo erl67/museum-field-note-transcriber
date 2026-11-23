@@ -114,11 +114,7 @@ def viewer_note(record, images, mapping, number_order):
                 partial_response=result.get("text", "") if result and not doc else "")
 
 
-def export_all(store, inventory, output, mapping=None):
-    separate_from_sources(inventory, output)
-    output = Path(output)
-    for folder in ("readable", "details", "collectors"):
-        inside(output, folder)
+def mapped_images(inventory, mapping=None):
     mapping = mapping or {"version": 1, "images": {}}
     if mapping.get("version") != 1 or not isinstance(mapping.get("images"), dict):
         raise ValueError("Drive mapping needs version 1 and images object")
@@ -128,6 +124,15 @@ def export_all(store, inventory, output, mapping=None):
                 or not re.fullmatch(r"[A-Za-z0-9_-]{10,}", item.get("file_id", ""))
                 or item.get("original_sha256") != images[iid]["sha256"]):
             raise ValueError("Mapping needs a known image ID, actual Drive ID and matching original_sha256")
+    return images, mapping["images"]
+
+
+def export_all(store, inventory, output, mapping=None):
+    separate_from_sources(inventory, output)
+    output = Path(output)
+    for folder in ("readable", "details", "collectors"):
+        inside(output, folder)
+    images, drive_ids = mapped_images(inventory, mapping)
     records = current_records(store, inventory)
     ordered = sorted(records, key=note_number_key)
     order = {r["note_id"]: n for n, r in enumerate(ordered)}
@@ -168,7 +173,7 @@ def export_all(store, inventory, output, mapping=None):
                 for ev in item.get("evidence", []):
                     evidence_rows.append(dict(note_id=nid, field=key, item_index=index, image_id=ev["image_id"],
                                               entry_id=ev.get("entry_id") or item.get("entry_id"), quote=ev.get("quote"), location=ev.get("location")))
-        bundle.append(viewer_note(record, images, mapping["images"], order[nid]))
+        bundle.append(viewer_note(record, images, drive_ids, order[nid]))
     fields = ["note_id", "active", "collector_folder", "collector_display", "species_display", "numbers_display", "discovery", "grouping", "execution", "metadata_review", "transcription_review", "page_count", "summary", "report_path", "scan_sets"]
     write_csv(output / "catalogue.csv", fields, catalogue)
     write_csv(output / "images.csv", ["note_id", "image_id", "order", "path", "filename", "folder", "status", "sha256", "size", "width", "height", "side"], image_rows)

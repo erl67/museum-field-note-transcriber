@@ -2,29 +2,40 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { context, html } = require('../apps_script/viewer/test_support.cjs');
+const { context, html, sha } = require('../apps_script/viewer/test_support.cjs');
 const demo = path.resolve(__dirname, '../local/demo');
 
-function fixtureServer() {
+function fixtureServer(indexed = true) {
   if (!fs.existsSync(path.join(demo, 'synthetic-fixture.txt'))) throw Error('Run python scripts/make_demo.py first.');
   const raw = fs.readFileSync(path.join(demo, 'exports/Field_notes_viewer.json'), 'utf8');
   const bundle = JSON.parse(raw);
+  const specs = require('../test/inputs/demo.json').notes;
+  const allowed = new Set(specs.flatMap(spec => spec.pages.map(page => page.path)));
+  const pending = new Set(specs.filter(spec => spec.pending).flatMap(spec => spec.pages.map(page => page.path)));
   const tree = { folders: {} }, scans = new Map();
   for (const note of bundle.notes) {
-    if (note.provenance?.provider !== 'offline-fixture') throw Error('The preview accepts synthetic notes only.');
+    if (note.provenance?.provider !== 'offline-fixture' &&
+        !(note.execution === 'unprocessed' && note.scans.every(scan => pending.has(scan.path))))
+      throw Error('The preview accepts synthetic notes only.');
     for (const scan of note.scans) {
-      const [folder, name, ...more] = scan.path.split('/');
-      if (!folder || !name || more.length || !/^[a-z]+$/i.test(folder) || !/^[a-z]+\.jpg$/i.test(name)) {
-        throw Error('Unexpected synthetic fixture path.');
-      }
-      const data = fs.readFileSync(path.join(demo, 'cards', folder, name));
+      if (!allowed.has(scan.path)) throw Error('Unexpected synthetic fixture path.');
+      const parts = scan.path.split('/'), name = parts.pop();
+      const data = fs.readFileSync(path.join(demo, 'cards', ...parts, name));
       scans.set(scan.image_id, { isTrashed: () => false, getId: () => scan.image_id, getSize: () => data.length,
         getMimeType: () => 'image/jpeg', getBlob: () => ({ getBytes: () => [...data] }) });
-      tree.folders[folder] ||= [{ files: {} }];
-      tree.folders[folder][0].files[name] = [scan.image_id];
+      let parent = tree;
+      for (const folder of parts) {
+        parent.folders[folder] ||= [{ folders: {}, files: {} }];
+        parent = parent.folders[folder][0];
+      }
+      parent.files[name] = [scan.image_id];
     }
   }
-  const apps = context(bundle, { exportText: raw, scanRoot: 'synthetic_root', folderTree: tree, imageProvider: key => scans.get(key) }).sandbox;
+  const indexFile = indexed && (name => fs.readFileSync(path.join(demo, 'exports/Field_notes_index', name), 'utf8'));
+  if (indexed && JSON.parse(indexFile('index.json')).members_sha256 !==
+      sha(bundle.notes.filter(n => n.active).map(n => n.note_id).sort().join('\n')))
+    throw Error('The preview index does not match the synthetic fixture. Run scripts/make_demo.py.');
+  const apps = context(bundle, { exportText: raw, indexFile, scanRoot: 'synthetic_root', folderTree: tree, imageProvider: key => scans.get(key) }).sandbox;
   return { listFolders: input => apps.listFolders(input), loadNote: (id, input) => apps.loadNote(id, input),
     loadImage: request => ({ ...apps.loadImage(request), url: '' }) };
 }
@@ -60,7 +71,8 @@ function renderPage(template, url, reference) {
       number: url.searchParams.get('number') || (/^\?[0-9]+$/.test(url.search) ? url.search.slice(1) : ''),
       query: url.searchParams.get('number') || url.searchParams.get('query') || url.searchParams.get('q') ||
         (/^\?[0-9]+$/.test(url.search) ? url.search.slice(1) : ''),
-      appUrl: reference ? '/reference' : '/', error: '' };
+      indexed: reference ? '' : 'yes', pageNumber: url.searchParams.get('page') || '1',
+      listPage: url.searchParams.get('p') || '1', appUrl: reference ? '/reference' : '/', error: '' };
   const bridge = `<meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
 function runner(success, failure) {
@@ -78,6 +90,7 @@ window.google={script:{run:runner(()=>{},console.error)}};
 function createPreview(referenceFile) {
   const api = fixtureServer();
   const reference = referenceFile ? fs.readFileSync(referenceFile, 'utf8') : null;
+  const referenceApi = reference ? referenceCalls(fixtureServer(false)) : null;
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     res.setHeader('Cache-Control', 'no-store');
@@ -97,7 +110,7 @@ function createPreview(referenceFile) {
         if (body.length > 32000) throw Error('Request too large');
       }
       const { method, args } = JSON.parse(body);
-      const handlers = url.pathname === '/rpc' ? api : referenceCalls(api);
+      const handlers = url.pathname === '/rpc' ? api : referenceApi;
       if (!Object.hasOwn(handlers, method) || !Array.isArray(args)) throw Error('Unknown preview request');
       res.end(JSON.stringify({ result: handlers[method](...args) }));
     } catch (error) {

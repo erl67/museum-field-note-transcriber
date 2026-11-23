@@ -16,10 +16,11 @@ def state_for(store, destination):
 def generated_paths(store, input_root):
     # Only exact owned output paths beneath this input root are excluded.
     root, paths = Path(input_root).resolve(), set()
-    for event in store.events():
-        if event["kind"] != "publication":
+    latest = {e["data"]["destination"]: e["data"] for e in store.events() if e["kind"] == "publication"}
+    for destination, state in latest.items():
+        target = Path(destination)
+        if not (target.is_relative_to(root) or root.is_relative_to(target)):
             continue
-        state = state_for(store, event["data"]["destination"])
         for relative in state.get("files", {}):
             path = inside(state["destination"], relative)
             if path.is_relative_to(root):
@@ -62,9 +63,15 @@ def publish(store, inventory, output, destination):
         raise ValueError("Publication destination must be an existing accessible directory")
     files = set_readers(store, inventory)
     files["Field_notes_viewer.json"] = (output / "Field_notes_viewer.json").read_bytes()
-    owned = state_for(store, root).get("files", {})
+    return publish_files(store, inventory, files, root)
+
+
+def publish_files(store, inventory, files, root):
+    """Preflight the entire managed destination and write in producer order."""
+    previous = state_for(store, root)
+    owned = previous.get("files", {})
     source_paths = {str((Path(inventory["input_root"]) / i["path"]).resolve()).casefold() for i in inventory["images"]}
-    pending, archived = {}, {}
+    pending, archived, changed = {}, {}, set()
     for relative in files.keys() | owned.keys():
         path = inside(root, relative)
         if str(path).casefold() in source_paths or path.suffix.lower() not in {".txt", ".json"}:
@@ -75,12 +82,23 @@ def publish(store, inventory, output, destination):
                 raise ValueError(f"Unowned or externally edited output: {relative}")
             if relative not in files or files[relative] != raw:
                 archived[relative] = store.blob(raw, path.suffix)
+                changed.add(relative)
+        elif relative in files:
+            changed.add(relative)
         pending[relative] = sorted(set(owned.get(relative, []) + ([digest(files[relative])] if relative in files else [])))
+    if not changed and previous.get("status") == "complete" and owned.keys() == files.keys():
+        return len(files)
     store.append("publication", dict(destination=str(root), files=pending, archived=archived, status="pending"))
     for relative, content in files.items():
+        if relative not in changed:
+            continue
         path = inside(root, relative)
-        if path.exists() and digest(path.read_bytes()) not in owned.get(relative, []):
-            raise ValueError(f"Output changed during publication: {relative}")
+        if path.exists():
+            raw = path.read_bytes()
+            if digest(raw) not in owned.get(relative, []):
+                raise ValueError(f"Output changed during publication: {relative}")
+            if raw == content:
+                continue
         atomic_bytes(path, content)
     for relative in owned.keys() - files.keys():
         path = inside(root, relative)

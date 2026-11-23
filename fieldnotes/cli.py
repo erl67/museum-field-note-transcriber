@@ -12,10 +12,11 @@ from .discovery import discover, regroup, reconcile_paths, scan_order
 from .execution import transcribe
 from .exports import export_all
 from .images import prepare_request
-from .paths import separate_from_sources
+from .paths import inside, separate_from_sources
 from .profiles import load_profile, register_profile
 from .provider import Gemini, api_key
-from .publication import generated_paths, publish
+from .publication import generated_paths, publish, publish_files
+from .viewer_index import DIRECTORY, viewer_files, write_index
 from .review import apply_authority, apply_review, current_records
 from .storage import Store, identity, lock, read_json
 from .usage import aggregate, read_usage, reported_usage
@@ -55,6 +56,9 @@ def parser():
         sub = commands.add_parser(name)
         sub.add_argument("--output", default="local/exports")
         sub.add_argument("--mapping")
+        sub.add_argument("--viewer-only", action="store_true", help="Build the partitioned Apps Script reader index")
+        sub.add_argument("--viewer-notes", help="Optional JSON array of active note IDs for --viewer-only")
+        sub.add_argument("--verify-scans", action="store_true", help="Verify original JPEG bytes during an indexed export")
         if name == "publish":
             sub.add_argument("--destination", required=True, help="Explicit managed publication directory; not remembered as an automatic action")
     for name in ("group", "reconcile-paths", "review", "alias"):
@@ -74,10 +78,11 @@ def parser():
     return p
 
 
-def load_file(path):
+def load_file(path, expected_type=dict):
     value = read_json(path)
-    if not isinstance(value, dict):
-        raise ValueError(f"Expected a JSON object in {path}")
+    if not isinstance(value, expected_type):
+        kind = "array" if expected_type is list else "object"
+        raise ValueError(f"Expected a JSON {kind} in {path}")
     return value
 
 
@@ -149,6 +154,16 @@ def print_usage(report):
     if any(cost is None for cost in report["costs"]):
         print_progress("Some cost estimates are unavailable (missing token counts or configured prices). "
                        "JSON null means unknown, not zero.")
+
+
+def print_cumulative_progress(store):
+    inventory = store.latest("inventory")
+    if inventory is None:
+        return
+    records = [record for record in current_records(store, inventory) if record["active"]]
+    complete = sum(record["execution"] == "complete" for record in records)
+    print(f"Cumulative progress (all prepared sets): {complete:,}/{len(records):,} cards completed; "
+          f"{len(records) - complete:,} remaining.", flush=True)
 
 
 def run(args):
@@ -241,6 +256,25 @@ def run(args):
             print(json.dumps(event, ensure_ascii=False, indent=2))
             print("Saved append-only review. Run export to refresh titles, search and groups.")
         elif args.command in {"export", "publish"}:
+            if (args.viewer_notes or args.verify_scans) and not args.viewer_only:
+                raise ValueError("--viewer-notes and --verify-scans require --viewer-only")
+            if args.viewer_only:
+                files, warnings = viewer_files(store, inventory, load_file(args.mapping) if args.mapping else None,
+                                              load_file(args.viewer_notes, list) if args.viewer_notes else None, args.verify_scans)
+                target = inside(args.output, DIRECTORY)
+                write_index(target, files)
+                for warning in warnings:
+                    print("READER: " + warning)
+                manifest = json.loads(files["index.json"])
+                print(f"Indexed {manifest['count']} cards and {manifest['scans']} scans in {target}. "
+                      f"{len(warnings)} reading or scan issues.")
+                if args.command == "publish":
+                    if not Path(args.destination).is_dir():
+                        raise ValueError("Publication destination must be an existing directory")
+                    destination = inside(args.destination, DIRECTORY)
+                    publish_files(store, inventory, files, destination)
+                    print(f"Published viewer index to {destination}")
+                return 0
             count = export_all(store, inventory, args.output, load_file(args.mapping) if args.mapping else None)
             print(f"Exported {count} notes to {args.output}; zero requests")
             if args.command == "publish":
@@ -303,9 +337,18 @@ def run(args):
 
 
 def main(argv=None):
+    args = None
     try:
-        return run(parser().parse_args(argv))
+        args = parser().parse_args(argv)
+        return run(args)
     except KeyboardInterrupt:
         print("Interrupted; saved work retained. Inspect show/export before retrying.", file=sys.stderr); return 130
     except (OSError, ValueError, RuntimeError, ImportError, TypeError, KeyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr); return 1
+    finally:
+        # Keep the collection total last, even after a stopped run or Ctrl+C.
+        if args is not None and args.command == "transcribe":
+            try:
+                print_cumulative_progress(Store(args.store))
+            except (OSError, ValueError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+                print(f"Cumulative progress unavailable: {exc}", file=sys.stderr, flush=True)

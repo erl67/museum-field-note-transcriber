@@ -38,4 +38,10 @@ Existing unowned files and externally edited files stop publication. Superseded 
 
 Managed paths in the scan tree are excluded from later discovery for that store. Scans, unrelated text and other applications' outputs are never adopted. Keep the viewer JSON private even when the web viewer is intended for public use.
 
-When the destination is on Drive, synchronization transfers those working copies under the owner's existing sharing settings. The egg-slip and correspondence readers have a separate step in the website project that prepares public copies of scans and readings. The equivalent field-note step is deferred while transcription continues. See the [website reader decision](PROJECT_HANDOFF.md#november-20-website-reader-decision).
+When the destination is on Drive, synchronization transfers those working copies under the owner's existing sharing settings.
+
+## Apps Script index publication
+
+Use `export --viewer-only` to build the partitioned archive in `local/exports/Field_notes_index/`. Use `publish --viewer-only --destination <private synced folder>` to build it and transfer the current reachable files into the destination's `Field_notes_index/` subfolder. Choose the synced Transcriptions folder or another reader-data folder separate from ordinary exports. The indexed publisher touches only its owned JSON files under the generated child, including when the destination is inside the scan tree. Both commands take an optional verified Drive mapping, note selection and original-byte check. Unchanged files keep their modification times. After an interruption, repeat the same publication command from the same store. A completed local publication can precede completion of Drive synchronization.
+
+The existing single-file working export remains an input to the website publisher's field-note JPEG staging command. The [Apps Script installation guide](../apps_script/viewer/README.md) and [migration guide](viewer-index.md) describe each reader format.

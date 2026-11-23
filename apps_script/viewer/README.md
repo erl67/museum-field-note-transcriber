@@ -1,70 +1,85 @@
-# Field Notes viewer prototype
+# Field Notes Viewer for Google Apps Script
 
-This directory preserves the earlier Apps Script prototype and its offline tests. The planned public reader will be part of the birds website alongside the egg-slip and correspondence readers. The Drive configuration and deployment details below describe the prototype. See the [website reader decision](../../docs/PROJECT_HANDOFF.md#november-20-website-reader-decision).
+The opening page lists collectors and their scan sets. Selecting a set shows up to 40 whole cards at a time in scan order. Search accepts a collection number, a member of a written range or a stable `note_…` ID. The collector selector scopes the search. The reader places the selected scan beside its transcription, stacks them on narrow screens and offers full-size enlargement. Previous/next scan stays on the card. Previous/next note follows the set or search results.
 
-The viewer reads one saved export and loads each JPEG on demand from Google Drive. Its search, species groups, reader pages and scan enlargement use saved data. No service key is needed. The checked-in installation is restricted to the configuring user, has blank IDs, and has no deployment URL.
+## Try it offline
 
-## Try it locally
-
-From the repository root, run these in PowerShell.
+From the repository root in PowerShell, run:
 
 ```powershell
-& .\.venv\Scripts\python.exe scripts/make_demo.py
+$py = '.\.venv\Scripts\python.exe'
+& $py scripts/make_demo.py
 node scripts/preview.cjs
 ```
 
-Open [the local preview](http://127.0.0.1:8783/). It serves the actual template and server functions against a simulated Drive containing only the invented fixture. Try searching `12a`, opening the two-page note, enlarging either scan, and returning to species browsing. Ctrl+C stops the preview.
+Open [the synthetic preview](http://127.0.0.1:8783/). Try `0012` across both collectors, then select Carriker and open the two-page card. Search `8420` for an interior member of a written range. The preview uses invented scans. Ctrl+C stops it.
 
-## Historical prototype configuration
+## Prepare and publish private Drive data
 
-1. Prepare the local bundle with `& $py -m fieldnotes export`. The file is `local/exports/Field_notes_viewer.json`. Keep this file private. It can include full prompts, review reasons and partial service text.
-2. Place the approved export in a controlled Drive location using the documented publication operation or an authorized file transfer. Identify its actual Drive **file ID**. Identify a staff access-gate file and, for path-based scan lookup, the actual **folder ID** for the Field Notes root containing the collector folders. Use the relevant Drive item's URL to obtain its ID.
-3. Create a standalone Apps Script project. Copy this directory's `Code.gs` and `Viewer.html` into files named **Code** and **Viewer** of the corresponding types. Enable the manifest in project settings and copy `appsscript.json`. These are the three installation files. The HTML already embeds the client and styles.
-4. In your private project set `SETTINGS.ACCESS_FILE_ID`, `EXPORT_FILE_ID`, and optionally `SCAN_ROOT_FOLDER_ID`. Leave `PUBLIC_MODE: false`. The manifest requests only `drive.readonly` and specifies `USER_ACCESSING` and `MYSELF`. Authorize read access for the intended account. Configure any future restricted multi-user deployment to execute as the accessing user with the intended audience. Each visitor then needs access to the gate, the export and the scans they read.
-5. When deployment is authorized, test a known note, an inaccessible scan, and a second account with the expected permissions. Do not infer access from the owner's session. Use the URL assigned to this deployment. Never reuse another collection's deployment URL.
-
-The server rechecks the gate for the page and each restricted RPC. `listFolders` returns lightweight rows without scan bytes or page text. `loadNote` accepts the stable note ID and browse context. `loadImage` accepts only a note ID, an image ID belonging to that note and an export token. The token binds an image request to the bytes of the export that supplied its text.
-
-## Find a catalogue number
-
-Type the digits into Search or use `?number=8420` or `?8420` on the viewer URL. This looks up saved identifiers, including the endpoints and interior of an inclusive range. The results show all matching cards and their as-written numbers. Opening a card highlights the literal number or its written range in the transcription, on the evidence page when identified. The general `?q=` and `?query=` searches also include matches elsewhere in the saved text.
-
-## Resolve a scan
-
-The preferred setup uses one Field Notes root folder ID. For a path such as `Carriker/set1/valley.jpg` the server walks exact child names from that root, one folder at a time. A duplicate folder or filename stops lookup. A missing or invisible child can have the same Drive response. The viewer reports that uncertainty and keeps the transcription visible.
-
-Explicit mappings take precedence for selected images. For each mapped image use its real Drive file ID and the **original** SHA-256 from `images.csv`. This template intentionally contains placeholders. Save the filled file under ignored `local/drive-mapping.json`.
-
-```json
-{
-  "version": 1,
-  "images": {
-    "REPLACE_WITH_IMAGE_ID": {
-      "file_id": "REPLACE_WITH_ACTUAL_DRIVE_FILE_ID",
-      "original_sha256": "REPLACE_WITH_ORIGINAL_SHA256"
-    }
-  }
-}
-```
+1. Use the normal inventory, transcription and review commands. An inventoried card can appear before it has a completed reading. The journal and original JPEGs supply the inputs.
+2. Build the reader files locally. With the original scan volume mounted, add `--verify-scans` to check original sizes and SHA-256 values. Offline export validates the saved scan/page relationships, reports unavailable readings and lists inventory scan issues by ID.
+3. Choose a **private, locally synced Drive folder** for reader data. A Transcriptions subfolder inside Field Notes works. Use this as the publication destination. The publisher creates and manages its own `Field_notes_index` child. Keep the same local store for later publications.
+4. Wait for Drive for desktop to finish syncing. In the Drive web interface, identify the **Transcriptions parent folder ID** and the **scan-root folder ID** containing the collector directories. The viewer addresses index files by exact name inside the index folder. A new Drive file ID for a replaced index.json is fine.
 
 ```powershell
-& $py -m fieldnotes export --mapping local/drive-mapping.json
+$py = '.\.venv\Scripts\python.exe'
+& $py -m fieldnotes export --viewer-only
+# Example destination. Use your actual existing private folder on the synced drive.
+$destination = 'G:\My Drive\Field Notes\Transcriptions'
+& $py -m fieldnotes publish --viewer-only --verify-scans --destination $destination
 ```
 
-Supply the same `--mapping` on each export or publication that should use it. An explicit mapping that fails never falls back to a similarly named file. Missing mapping, missing or inaccessible scan, ambiguous path, stale export, changed bytes and absence of transcription have distinct messages. Folder names and source text render as literal text. Original size and SHA-256 must match before image bytes reach the browser.
+Run the same publish command after admitting a new collector or finished set, transcribing cards, or applying reviews. The index discovers collector and set names from the inventory. An unchanged publication leaves the destination files alone. Changed publications install the new objects before replacing the manifest, then retire obsolete owned files. Drive synchronization can briefly expose an incomplete update. Wait for sync and reload, or repeat a failed local publication with the same store. The [staff output guide](../../docs/outputs.md) covers ownership and recovery.
 
-Export size is limited to 10 MiB. A JPEG is limited to 12 MiB and a note to 24 MiB of scanned files for browser loading. Every page is positioned before scans load, and requests for images run sequentially. The desktop panels show the full image at its own aspect ratio. The reference mobile breakpoint stacks the scan above its text. “Enlarge scan” opens the verified image at natural dimensions in a scrollable dialog.
+### Optional image mapping
 
-## Prototype public access model
+Root-relative scan paths normally suffice. For example, `Carriker/set1/card.jpg` resolves by exact child names from the configured scan root. Duplicate or invisible items produce a message beside the available text. Each ready scan must match its recorded size and original hash before display.
 
-An owner-executed public deployment uses the owner's Drive permissions. It can disclose private scans and text to visitors who have no Drive access. Before choosing it, prepare a separate approved private export snapshot, review the actual pages, annotations, summaries, editorial notes, filenames, evidence and translations, and choose the note IDs suitable for disclosure. Later changes to approved IDs' contents also need review.
+An explicit mapping selects a particular Drive file. Save the mapping under ignored `local/drive-mapping.json`. Replace the placeholders with the actual image ID, Drive file ID and original SHA-256 from the inventory.
 
-Only after that decision, configure `PUBLIC_MODE: true`, the dedicated export file ID and explicit `PUBLIC_NOTE_IDS` in the private Apps Script project. Choose owner execution and the intended public audience during deployment. An empty public list exposes zero notes. Retired and unlisted IDs remain inaccessible, including requests for their images. The server constructs the public response from an explicit nested field list. It omits private reviews, raw failures, prompts, provenance, technical search fields, Drive IDs and direct Drive links. Public scan bytes are available for listed notes. The export file itself must stay private.
+```json
+{"version":1,"images":{"REPLACE_IMAGE_ID":{"file_id":"REPLACE_DRIVE_FILE_ID","original_sha256":"REPLACE_ORIGINAL_SHA256"}}}
+```
 
-The public gate uses a shared short-lived request budget of 120 RPC/page requests and 60 image requests per minute. Busy locks or unavailable cache fail closed. This limits load and does not identify visitors or guarantee a provider quota. Neither deployment mode writes to Drive or changes sharing.
+Add `--mapping local/drive-mapping.json` to each indexed export or publication that uses it. A failing explicit mapping reports an error for that scan.
 
-## Template maintenance
+## Install the web app
 
-`reference.css` is the exact first style block of the correspondence template, including whitespace after LF normalization. The embedded first style block must match it byte for byte. The second block styles the browse selectors, scan enlargement and the catalogue-number highlight. Transcription panels grow with their text. When a page, annotation or translation contains a line of 72 characters or more, all desktop pages in that note use the reference's 47/53 scan-to-text split. Shorter lines use equal columns. The footer points to the [field-note repository](https://github.com/erl67/museum-field-note-transcriber).
+For manual copy-and-paste, prepare a private installation from the repository root. Supply the folder IDs from the two Drive links.
 
-The template orders collector folders by latest finished processing activity when available and alphabetically on ties. Carriker opens by name regardless of that order. The scan-set selector appears for nested folders. Search, collector, set, group, sort and mode follow a reader link and its previous/next navigation. Pages with a recorded side show **Front** or **Back**. In a public deployment, **Copy note link** copies this deployment's `?note=note_…` bookmark, with a selectable URL if clipboard access fails. Rebuild the embedded script after editing `client.js` with `& $py scripts/build_viewer.py`. See [offline tests](../../docs/testing.md).
+```powershell
+& $py scripts/build_viewer.py --scan-root <SCAN_FOLDER_ID> --index-parent <TRANSCRIPTIONS_FOLDER_ID>
+```
+
+Replace both placeholders before running the command. The three files in `local/apps-script-install/` are ready for the Apps Script editor. **Code.gs** includes both server modules and the configured folder IDs. Copy its contents into **Code**, copy **Viewer.html** into **Viewer**, and copy **appsscript.json** into the manifest. Continue at step 3 below. This version resolves the named index folder under Transcriptions on each request. The signed-in visitor's access to that folder supplies the gate.
+
+For an installation directly from the tracked sources:
+
+1. Open a standalone Apps Script project. Add script files **Code** and **Index** from `Code.gs` and `Index.gs`. Add an HTML file named **Viewer** from `Viewer.html`. Enable **Show "appsscript.json" manifest file in editor** in Project Settings and use the supplied `appsscript.json`. These four files are the installation. The HTML embeds its client and CSS.
+2. In the project's private copy of **Code**, set `SETTINGS.INDEX_PARENT_FOLDER_ID` to the Transcriptions folder and `SCAN_ROOT_FOLDER_ID` to the original scan root. Alternatively, set `INDEX_FOLDER_ID` to the generated folder itself. A separate `ACCESS_FILE_ID` is optional for indexed deployments. If used, choose a stable file visible to the intended readers. Leave `EXPORT_FILE_ID` blank and `PUBLIC_MODE` false for this installation. Each reader needs permission to the gate, index folder and original scans.
+3. Save. Use **Deploy → Test deployments → Web app** for an editor test. Authorize read-only Drive access in the intended account. Open the test URL. For the private installed version, use **Deploy → New deployment → Web app**, execute as the **user accessing the web app** and choose **only myself**. The checked-in manifest uses this private configuration.
+4. Copy the assigned `/exec` URL. After changing code, use **Deploy → Manage deployments → Edit**, select a new version and update the same deployment to preserve bookmarks. Data-only updates use the publisher and keep the same web app URL.
+
+The indexed reader rechecks its gate at every page and data request. It opens files by exact names or verified image mappings. A scan over 12 MiB receives an explicit display-limit message. A new page selection downloads one JPEG. Browser requests cannot name a Drive file or filesystem path directly.
+
+### Verify a deployment
+
+- Open the home URL in the intended account. Compare the collector and set counts with the local export. Expand a collector and follow a set.
+- Inspect a completed front/back card. Compare the original filenames, sequence, visible text and review states with the local reading. Enlarge a scan. Copy its page link, open it in another tab and use Back after visiting a neighboring card.
+- Search a known written number and a range member. Try a missing identifier and, when available, a duplicate across collectors. Check that an incomplete card still displays its scan.
+- Test a narrow viewport and a fresh signed-in session. If you subsequently choose a restricted multi-user audience, check an intended reader and an account outside that audience. A Drive sync error or revoked permission must leave an explanatory message.
+- Use the [index and migration guide](../../docs/viewer-index.md) for the portable URLs and file contract. Google's [web-app deployment guide](https://developers.google.com/apps-script/guides/web) describes deployment identity and editor-only test URLs.
+
+### Optional public installation
+
+The private installation is sufficient for development. For a separate public release, review the actual notes, scans, metadata, paths, translations and annotations for disclosure. Build a dedicated private destination with `--viewer-notes local/approved-note-ids.json`. That file is a JSON array of unique active note IDs. Use the identical list for `PUBLIC_NOTE_IDS` in the private script configuration and enable `PUBLIC_MODE`. The manifest membership must match, and direct note/image lookup also enforces the allowlist. An empty list and an empty index display no cards. Re-review changed readings before republishing.
+
+Choose the owner execution identity and intended audience explicitly for such a deployment. Visitors can see the selected reading and verified image bytes using the owner's permissions. Keep the index folder and scan collection private. Public responses omit Drive file IDs, Drive links and private processing history. Existing public request and image budgets apply to the indexed endpoints as well.
+
+## Existing installations and styling
+
+An existing installation configured only with `EXPORT_FILE_ID` continues to use its v1 working bundle and earlier full-text/species browser. The 10 MiB whole-export limit still applies there. Set `INDEX_FOLDER_ID` to switch to the indexed reader. Stable note IDs and numeric bookmarks carry across.
+
+The first style block is the verbatim `reference.css`. The second block adapts the current website's back link, search spacing and button, transcript wrapping and mobile minimum height. It also styles the set list, collector controls, number highlight, scan dialog and the correspondence Apps Script migration notice below the header. Its future-tense text lives in one `aside` in `Viewer.html`. The site stylesheet could be linked via HTTPS. Embedding these rules keeps the Drive backup and offline preview independent of website availability. [HTML Service restrictions](https://developers.google.com/apps-script/guides/html/restrictions)
+
+After editing `client.js`, run `& $py scripts/build_viewer.py` and the [offline checks](../../docs/testing.md).

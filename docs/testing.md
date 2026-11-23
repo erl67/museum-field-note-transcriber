@@ -28,15 +28,15 @@ Remove-Item Env:FIELDNOTES_TEST_ROOT, Env:FIELDNOTES_TEST_SET
 
 ## Browser comparison
 
-Build the invented fixture with `& $py scripts/make_demo.py`. For a synthetic viewer preview run `node scripts/preview.cjs`. The optional comparison takes a local copy of the reference **HTML template only** as its argument. No reference repository is needed for normal tests or preview. Keep any comparison copy under ignored `local/`.
+Build invented cards from `test/inputs/demo.json` and start the loopback preview. In another PowerShell window, run the comparison with Playwright resolvable by Node and Microsoft Edge installed.
 
 ```powershell
-# First PowerShell window, from the repository root:
-node scripts/preview.cjs local/reference-baseline/Viewer.html
-# Second window, with Playwright resolvable by Node and Edge installed:
-node scripts/check_layout.cjs
+& $py scripts/make_demo.py
+node scripts/preview.cjs
+# In a second window, pass a read-only copy of the current website's dist directory:
+node scripts/check_layout.cjs ../ericlaslo-website/dist
 ```
 
-For the optional browser harness, use an installed Playwright package through Node's module resolution or set `NODE_PATH` to the directory that contains it. Verification used Playwright 1.62.1 and Edge 157.0.4341.60. The browser channel defaults to `msedge` and can be set with `FIELDNOTES_BROWSER_CHANNEL`. This is a QA dependency only. The harness prevents external page requests. It opens the reference and field-note templates with the same synthetic card data, checks common computed styles, measures both real page panels at 1365 × 950 and 390 × 844, and exercises enlargement, return, species filtering, Search and Show all. PNGs and numeric measurements go into `local/visual-check/`. Stop the local server with Ctrl+C.
+The harness serves synthetic catalogue and JPEG responses to the actual website Correspondence HTML, JavaScript and shared CSS. It compares computed reader styles and scan columns at 1365 and 390 CSS pixels, then checks enlargement, page navigation, Back, identifier filtering and range highlighting. Measurements and synthetic screenshots go under `local/visual-check/`. The website files are an optional comparison input. Routine tests and preview run independently.
 
-The [handoff](PROJECT_HANDOFF.md) records the dated results, observed scan count and interpretation limits. Browser fixtures exercise the earlier Apps Script prototype locally. Tests for the website reader are deferred with its implementation.
+The Python suite also runs the Apps Script resolver with a generated archive of **10,000 two-page cards**. It checks the exact index reads for home and set browsing, bounded search reads, duplicate identifiers, leading zeros, search scope, cross-page neighbors, individual scan links, lost access, stale data and zero JPEG reads on listing. The managed publisher tests check unchanged bytes, external edits, original-byte verification and interrupted replacement. These checks measure local behavior. Live Drive latency, authentication and quota behavior require a deployed viewer.

@@ -80,6 +80,8 @@ Count one initial request per card, including a card with two scans. Retries and
 
 For temporary service errors such as HTTP 503, the default allows five attempts per card with waits of approximately 1, 2, 4 and 8 minutes. The CLI reports progress during those waits. Persistent service errors still stop the batch after that budget; saved cards remain complete. The final summary shows reported token subtotals even when failed requests supplied no counts. A JSON `null` means unknown, including costs without configured prices.
 
+The last line, after the JSON, shows cumulative progress across all prepared sets in the store: `Cumulative progress (all prepared sets): 120/200 cards completed; 80 remaining.` It includes completed cards from earlier runs, even when this run processes just one set. Front/back pairs count as one card. Uninventoried sets and retired records are excluded; failed, interrupted or stale readings remain incomplete. This line also appears after a service stop or Ctrl+C.
+
 ## Correct and share readings
 
 The saved service result, human corrections, and review decisions have separate histories. Completing a reading leaves metadata and transcription unreviewed. A correction updates titles and browse groups when reports are regenerated. Staff can approve a number while leaving the page text under review.
@@ -96,17 +98,19 @@ The saved service result, human corrections, and review decisions have separate 
 
 These are independent operations, each using a staff-prepared file. The review guide gives working file shapes, replacement rules and examples. [Human review, aliases and grouping](docs/review.md) · [Transcription record schema](docs/schema.md) · [Handwriting profiles](docs/handwriting.md)
 
-## Website reader
+## Field Notes Viewer
 
-Field notes will appear on the birds website alongside the egg-slip and correspondence readers. Work on the website reader is deferred while transcription continues. For now, use the local catalogue and reading files above to browse actual notes.
-
-The earlier Apps Script prototype remains available for an offline preview with invented cards.
+The Google Apps Script reader opens with collectors and scan sets. Browse cards in scanner order, search by written number or stable note ID, and share a link to an individual page. Each scan opens beside its own transcription.
 
 ```powershell
+# Build the private reader index from the current inventory and reviewed readings.
+& $py -m fieldnotes export --viewer-only
+
+# Preview the interface with invented cards.
 & $py scripts/make_demo.py
 node scripts/preview.cjs
 ```
 
-Open [the local synthetic preview](http://127.0.0.1:8783/) while the command is running. Press Ctrl+C to stop it. See the [prototype notes](apps_script/viewer/README.md) and [guide to local exports and managed working copies](docs/outputs.md).
+Open the [synthetic preview](http://127.0.0.1:8783/) while the server is running. The [Apps Script setup and deployment guide](apps_script/viewer/README.md) covers private Drive publication, adding collectors and testing the deployment. The [index format and website migration guide](docs/viewer-index.md) describes the future reader at `/birds/field-notes/`.
 
 For maintainers, see [offline tests and visual checks](docs/testing.md) and [project handoff, origins and collection inspection](docs/PROJECT_HANDOFF.md).

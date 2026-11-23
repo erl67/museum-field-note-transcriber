@@ -1,0 +1,52 @@
+// The Python suite supplies the complete synthetic 10,000-card export on stdin.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { context, sha, frontend, nodes } = require('../apps_script/viewer/test_support.cjs');
+const files = JSON.parse(fs.readFileSync(0, 'utf8'));
+const indexFile = key => files[key];
+const { sandbox: api, indexReads, counts } = context(undefined, { indexFile });
+const home = api.listFolders({});
+assert.equal(home.total, 10000);
+assert.equal(home.scans, 20000);
+assert.deepEqual(indexReads, ['index.json']);
+assert.equal(home.rows, undefined);
+const byParent = context(undefined, {indexFile, indexParent:true});
+assert.equal(byParent.sandbox.listFolders({}).total, home.total);
+assert.deepEqual(byParent.lookups, ['folder:Field_notes_index']);
+assert.throws(() => context(undefined, {indexFile, indexParent:true, deny:true}).sandbox.listFolders({}), /Access denied/);
+assert.throws(() => context(undefined, {indexFile, indexParent:true, indexChildren:0}).sandbox.listFolders({}), /missing/);
+assert.throws(() => context(undefined, {indexFile, indexParent:true, indexChildren:2}).sandbox.listFolders({}), /Multiple/);
+const browser = frontend({ indexed: 'yes' });
+browser.catalogueCalls[0].success(home);
+assert.equal(nodes(browser.ids.results).filter(n => n.tag === 'table').length, 0);
+assert.equal(nodes(browser.ids.results).filter(n => n.tag === 'details').length, 2);
+const rows = api.listFolders({ collector: 'A', set: 'A/set1', p: 2 });
+assert.equal(indexReads.length, 4);
+assert.equal(rows.rows.length, 40);
+assert.equal(rows.rows[0].numbers[0], '40');
+const id = 'note_' + sha('39').slice(0, 32);
+for (const [number, collector, total] of [[' SHARED ', '', 2], ['shared', 'B', 1], ['0012', '', 1],
+  ['12', '', 1], ['12A', 'A', 1], ['12a', 'B', 0], ['8420', '', 2], [id, 'A', 1], [id, 'B', 0], ['absent', '', 0]]) {
+  const before = indexReads.length, listing = api.listFolders({ number, collector });
+  assert.equal(listing.total, total, number + '/' + collector);
+  assert.ok(indexReads.length - before <= 5);
+}
+const loaded = api.loadNote(id, { page: 2 });
+assert.equal(loaded.navigation.position, 40);
+assert.equal(loaded.navigation.next.note_id, rows.rows[0].note_id);
+assert.equal(loaded.context.set, 'A/set1');
+assert.equal(loaded.context.page, 2);
+assert.equal(loaded.note.scans[1].image_id, loaded.note.pages[1].image_id);
+browser.sandbox.renderNote(loaded);
+assert.equal(nodes(browser.ids.record).filter(n => n.className === 'page-pair').length, 1);
+assert.equal(nodes(browser.ids.record).some(n => n.textContent.includes('A second observation')), true);
+assert.equal(counts().imageReads, 0);
+const request = { note_id: id, image_id: loaded.note.scans[1].image_id, token: loaded.token };
+assert.equal(api.loadImage(request).status, 'missing_mapping');
+assert.equal(api.loadImage({ ...request, token: 'old' }).status, 'stale_export');
+assert.throws(() => api.loadImage({ ...request, image_id: 'img_' + '0'.repeat(32) }), /part of this note/);
+assert.throws(() => api.loadNote(id, { page: 3 }), /absent/);
+assert.throws(() => context(undefined, { indexFile, deny: true }).sandbox.listFolders({}), /Access denied/);
+assert.throws(() => context(undefined, { indexFile, publicMode: true, allowlist: [] }).sandbox.listFolders({}), /selection differ/);
+const broken = context(undefined, { indexFile: key => key === 'index.json' ? files[key] : '{}' }).sandbox;
+assert.throws(() => broken.listFolders({ set: 'A/set1' }), /content changed/);

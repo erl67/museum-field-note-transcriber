@@ -1,4 +1,16 @@
-# Project handoff · November 21, 2026
+# Project handoff · November 23, 2026
+
+## November 23 indexed Apps Script reader
+
+Apps Script is the first deployment target. The website migration follows private Drive testing. The current website correspondence/egg readers, shared CSS, redirects and publisher were inspected read-only. The website publisher already stages field-note JPEGs with its prepare-only field-notes option.
+
+The indexed Apps Script deployment reads a collector/set manifest, 40-card browse pages, sharded identifier and ID directories, then the selected card and one hash-verified scan. Local export and managed publication use `--viewer-only`. The private manual-copy build accepts the original scan folder and Transcriptions parent IDs and generates Code, Viewer and the manifest under ignored `local/apps-script-install/`. The intended Drive location is a managed `Field_notes_index` child of Transcriptions. The [installation guide](../apps_script/viewer/README.md) and [portable archive contract](viewer-index.md) cover updates and migration.
+
+The saved Carriker archive at this check held 462 active cards and 576 scans across two sets. The two independent exports agreed on every stable card ID, set position, written identifier array, transcription page, ordered image ID, source path and recorded hash. There were 456 complete readings and six failed readings. Set 1 contained 356 cards and 364 scans, set 2 contained 106 cards and 212 scans. Its new homepage manifest measured 644 bytes. A synthetic test exercises 10,000 cards and 20,000 scan references through the actual resolver, including set-page boundaries and exact identifier collisions. The Google session required sign-in, the mounted originals were inaccessible here, and browser rendering could not run in this environment. A live deployment, original-byte verification on the mounted collection and a fresh visual comparison remain operator checks.
+
+## November 23 cumulative CLI progress
+
+Every transcription command now ends with a cumulative completed/total-card count and remaining count, after the JSON and any error or interruption message. It reads current saved states across all active inventoried notes in the store, including earlier runs and sets outside the command's selection. Retired records, duplicate revisions and uninventoried scans do not inflate the denominator. Front/back pages remain one card; stale or unsuccessful readings do not count as complete. Retry behavior and collection history are unchanged. Synthetic checks cover a 503 stop followed by resumption, a no-op pending run, interruption, stale readings and the final-line placement.
 
 ## November 21 service retries and usage feedback
 

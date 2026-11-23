@@ -5,7 +5,7 @@ from io import StringIO
 import json
 from pathlib import Path
 from unittest.mock import patch
-from fieldnotes.cli import main, parser, select, usage_summary
+from fieldnotes.cli import main, parser, select, usage_summary, print_cumulative_progress
 from fieldnotes.discovery import discover
 from fieldnotes.execution import Quota, transcribe
 from fieldnotes.exports import export_all
@@ -104,6 +104,68 @@ class CliTests(Workspace):
         self.assertEqual(len(fake.calls), 6)
         self.assertEqual([r["execution"] for r in self.store.results()], ["complete", "complete"])
 
+    def test_cumulative_last_line_includes_previous_sets_after_503_and_resume(self):
+        self.setup_note(names=["C/set1/front.jpg", "C/set1/back.jpg"], complete_sets=["C/set1"])
+        self.save(); self.save()  # Two revisions still represent one completed card.
+        jpeg(self.inputs / "C/set2/next.jpg")
+        jpeg(self.inputs / "C/set3/still-scanning.jpg")
+        inventory = discover(self.inputs, self.inventory, complete_sets=["C/set2"])
+        self.store.append("inventory", inventory)
+        next_note = next(n for n in inventory["notes"] if n["active"] and n["note_id"] != self.note["note_id"])
+        fake = FakeTransport([ServiceError(503)] * 5 + [response(rich_document(next_note["image_ids"]))])
+        clock = Clock()
+        def execute(*args, **kwargs):
+            return transcribe(*args, **kwargs, sleep=clock.sleep,
+                              quota=Quota(self.config, clock.time, clock.sleep))
+        args = ("transcribe", "--pending", "--set", "C/set2", "--output", str(self.root / "exports"))
+        with patch("fieldnotes.cli.load_config", return_value=self.config), \
+             patch("fieldnotes.cli.api_key", return_value="dummy"), patch("fieldnotes.cli.Gemini", return_value=fake), \
+             patch("fieldnotes.cli.transcribe", side_effect=execute):
+            code, message = self.call(*args)
+            self.assertEqual(code, 1, message)
+            self.assertEqual(json.loads(message.splitlines()[-2])["attempts"], 5)
+            self.assertEqual(message.splitlines()[-1],
+                             "Cumulative progress (all prepared sets): 1/2 cards completed; 1 remaining.")
+            code, message = self.call(*args)
+            self.assertEqual(code, 0, message)
+            self.assertEqual(json.loads(message.splitlines()[-2])["attempts"], 1)
+            self.assertEqual(message.splitlines()[-1],
+                             "Cumulative progress (all prepared sets): 2/2 cards completed; 0 remaining.")
+            code, message = self.call(*args)
+            self.assertEqual(code, 0, message)
+            self.assertEqual(json.loads(message.splitlines()[-2])["attempts"], 0)
+            self.assertEqual(message.splitlines()[-1],
+                             "Cumulative progress (all prepared sets): 2/2 cards completed; 0 remaining.")
+        self.assertEqual(len(fake.calls), 6)
+
+    def test_cumulative_line_is_last_after_interruption_and_uses_current_status(self):
+        self.setup_note(names=["C/a.jpg"])
+        self.save()
+        clock = Clock()
+        with patch("fieldnotes.cli.load_config", return_value=self.config), \
+             patch("fieldnotes.cli.api_key", return_value="dummy"), \
+             patch("fieldnotes.cli.Gemini", return_value=FakeTransport([KeyboardInterrupt()])), \
+             patch("fieldnotes.execution.Quota", side_effect=lambda config, sleep: Quota(config, clock.time, clock.sleep)):
+            code, message = self.call("transcribe", "--all", "--fresh", "--output", str(self.root / "exports"))
+        self.assertEqual(code, 130, message)
+        self.assertIn("Interrupted; saved work retained", message)
+        self.assertEqual(message.splitlines()[-1],
+                         "Cumulative progress (all prepared sets): 0/1 cards completed; 1 remaining.")
+
+    def test_cumulative_totals_do_not_count_stale_results_or_write_history(self):
+        self.setup_note(names=["C/a.jpg"])
+        self.save()
+        changed = deepcopy(self.inventory)
+        changed["images"][0]["sha256"] = "changed source hash"
+        self.store.append("inventory", changed)
+        before = self.store.journal.read_bytes()
+        output = StringIO()
+        with redirect_stdout(output):
+            print_cumulative_progress(self.store)
+        self.assertEqual(output.getvalue().strip(),
+                         "Cumulative progress (all prepared sets): 0/1 cards completed; 1 remaining.")
+        self.assertEqual(self.store.journal.read_bytes(), before)
+
     def test_transcription_follows_scan_order_and_preserves_whole_notes(self):
         groups = json.loads((Path(__file__).parent / "inputs/scan-order.json").read_text(encoding="utf-8"))
         for group in groups:
@@ -172,7 +234,9 @@ class CliTests(Workspace):
             self.assertIn("Gemini request 1/5. Daily attempts 500/500", message)
             self.assertIn("Updating saved reports", message)
             self.assertIn("1/2 cards complete", message)
-            self.assertEqual(json.loads(message.splitlines()[-1])["attempts"], 1)
+            self.assertEqual(json.loads(message.splitlines()[-2])["attempts"], 1)
+            self.assertEqual(message.splitlines()[-1],
+                             "Cumulative progress (all prepared sets): 1/2 cards completed; 1 remaining.")
             self.assertIn("500 of 500 attempts", message)
             self.assertIn("--pending", message)
             self.assertEqual(len(fake.calls), 1)

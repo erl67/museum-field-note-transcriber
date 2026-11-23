@@ -26,6 +26,17 @@
       "species": "Example marsh bird",
       "pages": [{"path": "Avery/pond.jpg", "size": [780, 540], "text": "Example marsh bird\n\nMill pond (0012)."}],
       "passages": [{"key": "pond", "number": "0012", "locality": "Mill pond"}]
+    },
+    {
+      "key": "shore",
+      "summary": "Synthetic observation from a labelled scan set.",
+      "pages": [{"path": "Carriker/set1/shore.jpg", "size": [850, 500], "text": "North shore (0145).\nTwo birds at the water."}],
+      "passages": [{"key": "shore", "number": "0145", "locality": "North shore"}]
+    },
+    {
+      "key": "waiting",
+      "pending": true,
+      "pages": [{"path": "Carriker/set2/waiting.jpg", "size": [740, 510], "text": "Invented card awaiting transcription."}]
     }
   ]
 }

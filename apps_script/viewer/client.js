@@ -7,12 +7,28 @@ function element(tag, text, parent, className) {
   if (parent) parent.appendChild(node);
   return node;
 }
+// Hosting boundary for the three reader operations.
+function viewerRequest(method, args, success, failure) {
+  google.script.run.withSuccessHandler(success).withFailureHandler(failure)[method](...args);
+}
 const state = { number: document.body.dataset.number || '', query: document.body.dataset.query || '', mode: document.body.dataset.mode || 'collector',
   collector: document.body.dataset.collector || '', set: document.body.dataset.set || '',
   group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
 let expanded = {};
+const indexed = document.body.dataset.indexed === 'yes';
+if (indexed) {
+  state.p = document.body.dataset.p || '1';
+  state.page = document.body.dataset.page || '1';
+}
+function indexedUrl(changes) {
+  const values = { collector: state.collector, set: state.set, number: state.query, p: state.p, ...changes };
+  const query = Object.entries(values).filter(([k, v]) => v && !(['p', 'page'].includes(k) && Number(v) === 1))
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+  return document.body.dataset.url + (query ? '?' + query : '');
+}
 try { expanded = JSON.parse(sessionStorage.getItem('fieldnotes-folders') || '{}'); } catch (error) { expanded = {}; }
 function urlFor(id, group) {
+  if (indexed) return indexedUrl({ note: id });
   const values = { ...state, group: group === undefined ? state.group : group };
   if (values.number) delete values.query;
   if (id) values.note = id;
@@ -21,15 +37,15 @@ function urlFor(id, group) {
 function linkTo(id, label, parent, group) {
   const a = element('a', label, parent); a.href = urlFor(id, group); return a;
 }
-function renderShareLink(parent, id) {
-  const url = document.body.dataset.url + '?note=' + encodeURIComponent(id);
+function renderShareLink(parent, id, page = 1) {
+  const url = document.body.dataset.url + '?note=' + encodeURIComponent(id) + (page > 1 ? '&page=' + page : '');
   const share = element('div', null, parent, 'letter-share');
   const button = element('button', 'Copy note link', share); button.type = 'button';
   const status = element('span', '', share, 'letter-share-status muted');
   status.setAttribute('role', 'status');
   const field = element('input', null, share);
   field.type = 'url'; field.value = url; field.readOnly = true; field.hidden = true;
-  field.setAttribute('aria-label', 'Public note link');
+  field.setAttribute('aria-label', 'Note link');
   button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(url);
@@ -48,7 +64,68 @@ function expansionKey(folder) {
   return JSON.stringify(key);
 }
 function countLabel(count, noun) { return count + ' ' + noun + (count === 1 ? '' : 's'); }
+function collectorOptions(names) {
+  const select = document.getElementById('collector-filter');
+  select.replaceChildren();
+  element('option', 'All collectors', select).value = '';
+  for (const name of names) element('option', name, select).value = name;
+  select.value = state.collector;
+}
+function pageLinks(parent, current, total, param, note) {
+  if (total <= 1) return;
+  const nav = element('nav', null, parent, 'letter-nav');
+  const noun = param === 'page' ? 'Scan' : 'Page';
+  nav.setAttribute('aria-label', noun + ' navigation');
+  const steps = element('div', null, nav, 'nav-steps');
+  for (const [number, label] of [[current - 1, 'Previous'], [current + 1, 'Next']]) {
+    if (number < 1 || number > total) continue;
+    element('a', label + ' ' + noun.toLowerCase(), steps, 'button').href = indexedUrl({ note, [param]: number });
+  }
+  element('span', noun + ' ' + current + ' of ' + total, nav, 'nav-position');
+}
+function renderIndex(result) {
+  const root = document.getElementById('results'); root.replaceChildren();
+  collectorOptions(result.collectors.map(c => c.name));
+  const home = result.kind === 'home', search = result.kind === 'search';
+  document.getElementById('browse-title').textContent = home ? 'Collectors' : search ? 'Search results' : state.set;
+  document.getElementById('browse-intro').textContent = home ? 'Select a scan set to browse its cards in scan order.' : '';
+  document.getElementById('message').textContent = countLabel(result.total, 'card') +
+    (home ? ' · ' + countLabel(result.scans, 'scan') : search ? ' matching “' + state.query + '”' : '');
+  if (home) {
+    for (const c of result.collectors.filter(c => !state.collector || c.name === state.collector)) {
+      const details = element('details', null, root, 'folder');
+      details.open = c.name === state.collector || result.collectors.length === 1;
+      const heading = element('summary', c.name, details);
+      element('span', countLabel(c.count, 'card'), heading, 'folder-count');
+      const list = element('ul', null, details, 'set-list');
+      for (const set of c.sets) {
+        const item = element('li', null, list);
+        const label = set.name === c.name ? 'Loose cards' : set.name === '.' ? 'Collection root' :
+          set.name.startsWith(c.name + '/') ? set.name.slice(c.name.length + 1) : set.name;
+        element('a', label, item).href = indexedUrl({ collector: c.name, set: set.name, number: '', p: 1 });
+        element('span', countLabel(set.count, 'card') + ' · ' + countLabel(set.scans, 'scan'), item, 'folder-count');
+      }
+    }
+    return;
+  }
+  if (!result.rows.length) { element('p', 'No records on this page. Check the identifier or collector.', root); return; }
+  const table = element('table', null, element('div', null, root, 'table-wrap'));
+  const head = element('tr', null, element('thead', null, table));
+  for (const title of ['Collection numbers', 'Species', 'Collector / set', 'Reading']) element('th', title, head).scope = 'col';
+  const body = element('tbody', null, table);
+  for (const row of result.rows) {
+    const tr = element('tr', null, body);
+    element('td', row.number_label, tr); element('td', row.species, tr);
+    const location = element('td', row.collector, tr);
+    element('span', row.sets.join(', '), location, 'field-note');
+    const cell = element('td', null, tr);
+    linkTo(row.note_id, 'Read note →', cell).setAttribute('aria-label', 'Read note: ' + row.number_label + ', ' + row.note_id);
+    element('span', countLabel(row.pages, 'page') + ' · ' + row.execution, cell, 'field-note');
+  }
+  pageLinks(root, result.p, Math.ceil(result.total / result.pageSize), 'p');
+}
 function renderFolders(result) {
+  if (indexed) return renderIndex(result);
   const root = document.getElementById('results'); root.replaceChildren();
   document.getElementById('message').textContent = countLabel(result.total, 'note') + ' in ' +
     countLabel(result.folders.length, state.mode === 'collector' ? 'collector folder' : 'species group');
@@ -104,12 +181,13 @@ function loadFolders() {
   const request = ++catalogueRequest;
   document.getElementById('catalogue').hidden = false; document.getElementById('record').hidden = true;
   document.getElementById('message').textContent = 'Loading field notes…';
-  google.script.run.withSuccessHandler(result => { if (request === catalogueRequest) renderFolders(result); })
-    .withFailureHandler(error => { if (request === catalogueRequest) document.getElementById('message').textContent = error.message; }).listFolders({ ...state });
+  viewerRequest('listFolders', [{ ...state }], result => { if (request === catalogueRequest) renderFolders(result); },
+    error => { if (request === catalogueRequest) document.getElementById('message').textContent = error.message; });
 }
 function renderNavigation(root, navigation, position) {
   const nav = element('nav', null, root, 'letter-nav'); nav.setAttribute('aria-label', 'Note navigation ' + position);
-  const back = element('a', '← All notes', nav, 'button'); back.href = urlFor(null);
+  const backLabel = indexed ? (state.query ? '← Search results' : state.set ? '← Scan set' : '← Collectors') : '← All notes';
+  const back = element('a', backLabel, nav, 'button'); back.href = urlFor(null);
   if (!navigation) return;
   element('span', navigation.position ? 'Note ' + navigation.position + ' of ' + navigation.total : 'Outside current browse selection', nav, 'nav-position');
   const steps = element('div', null, nav, 'nav-steps');
@@ -190,7 +268,7 @@ function renderSourceText(parent, text, tokens) {
       // Sequential downloads preserve positions and bound simultaneous image memory.
       const job = jobs.shift();
       if (!job) return;
-      google.script.run.withSuccessHandler(answer => {
+      viewerRequest('loadImage', [{ token: result.token, note_id: result.note.note_id, image_id: job.scan.image_id }], answer => {
         job.message.textContent = answer.message || '';
         if (answer.status === 'ready') {
           const image = element('img', null, job.sheet);
@@ -208,8 +286,7 @@ function renderSourceText(parent, text, tokens) {
           }
         }
         loadScans(jobs, result);
-      }).withFailureHandler(error => { job.message.textContent = error.message; loadScans(jobs, result); })
-        .loadImage({ token: result.token, note_id: result.note.note_id, image_id: job.scan.image_id });
+      }, error => { job.message.textContent = error.message; loadScans(jobs, result); });
     }
 
 
@@ -253,6 +330,7 @@ function renderNote(result) {
   const root = document.getElementById('record'); root.replaceChildren(); root.hidden = false;
   document.getElementById('catalogue').hidden = true;
   const note = result.note;
+  if (indexed) collectorOptions(result.collectors);
   root.dataset.wideTranscription = String(needsWiderTranscription(note));
   renderNavigation(root, result.navigation, 'top');
   const heading = element('header', null, root, 'letter-heading');
@@ -265,43 +343,58 @@ function renderNote(result) {
     element('p', 'Interpretive summary', summary, 'eyebrow'); element('p', note.summary, summary);
   }
   const jobs = [], pages = new Map(note.pages.map(p => [p.image_id, p]));
-  note.scans.forEach((scan, index) => renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs, hits));
+  if (indexed) pageLinks(root, state.page, note.scans.length, 'page', note.note_id);
+  note.scans.forEach((scan, index) => {
+    if (!indexed || index + 1 === state.page) renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs, hits);
+  });
   const scans = new Set(note.scans.map(s => s.image_id)); let number = note.scans.length;
   for (const page of note.pages) if (!scans.has(page.image_id)) renderPage(root, null, page, note, ++number, jobs, hits);
   if (!number) element('p', 'No source pages or complete transcription are available.', root, 'notice');
   const metadata = renderMetadata(root, note);
-  if (result.publicMode && /^note_[0-9a-f]{32}$/.test(note.note_id)) renderShareLink(metadata, note.note_id);
+  if ((indexed || result.publicMode) && /^note_[0-9a-f]{32}$/.test(note.note_id)) renderShareLink(metadata, note.note_id, indexed ? state.page : 1);
   const details = element('details', null, root, 'provenance');
-  element('summary', result.publicMode ? 'Metadata evidence' : 'Metadata evidence and provenance', details);
+  element('summary', indexed || result.publicMode ? 'Metadata evidence' : 'Metadata evidence and provenance', details);
   const evidence = { metadata: note.metadata, entries: note.entries, identifiers: note.identifiers, taxa: note.taxa,
     localities: note.localities, dates: note.dates, observations: note.observations };
-  if (!result.publicMode) Object.assign(evidence, { review_reasons: note.review_reasons, provenance: note.provenance, partial_response: note.partial_response });
+  if (!indexed && !result.publicMode) Object.assign(evidence, { review_reasons: note.review_reasons, provenance: note.provenance, partial_response: note.partial_response });
   element('pre', JSON.stringify(evidence, null, 2), details);
   renderNavigation(root, result.navigation, 'bottom'); loadScans(jobs, result);
 }
 function openNote(id) {
   document.getElementById('message').textContent = 'Loading note…';
-  google.script.run.withSuccessHandler(result => { document.getElementById('message').textContent = ''; renderNote(result); })
-    .withFailureHandler(error => { document.getElementById('message').textContent = error.message;
-      const root = document.getElementById('record'); root.hidden = false; renderNavigation(root, null, 'error'); }).loadNote(id, { ...state });
+  viewerRequest('loadNote', [id, { ...state }], result => { document.getElementById('message').textContent = ''; renderNote(result); },
+    error => { document.getElementById('message').textContent = error.message;
+      const root = document.getElementById('record'); root.hidden = false; renderNavigation(root, null, 'error'); });
 }
 document.getElementById('query').value = state.query;
 document.getElementById('browse-mode').value = state.mode;
 document.getElementById('sort-order').value = state.sort;
-document.getElementById('search').addEventListener('submit', event => {
-  event.preventDefault(); state.query = document.getElementById('query').value.trim();
-  state.number = /^[0-9]+$/.test(state.query) ? state.query : '';
-  state.group = ''; loadFolders();
-});
-document.getElementById('clear-search').addEventListener('click', () => {
-  document.getElementById('query').value = ''; state.query = ''; state.number = ''; state.collector = ''; state.set = ''; state.group = ''; loadFolders();
-});
-for (const [id, key] of [['browse-mode', 'mode'], ['collector-filter', 'collector'], ['set-filter', 'set'], ['sort-order', 'sort']]) {
-  document.getElementById(id).addEventListener('change', () => {
-    state[key] = document.getElementById(id).value; state.group = '';
-    if (key === 'collector') state.set = '';
-    loadFolders();
+if (indexed) {
+  const form = document.getElementById('search');
+  document.querySelector('.site-header').appendChild(form);
+  document.getElementById('legacy-controls').hidden = true;
+  document.getElementById('clear-search').addEventListener('click', () => {
+    document.getElementById('query').value = '';
+    document.getElementById('collector-filter').value = '';
+    form.submit();
   });
+} else {
+  document.getElementById('query-label').textContent = 'Search collectors, collection numbers, species, localities, or saved text';
+  document.getElementById('search').addEventListener('submit', event => {
+    event.preventDefault(); state.query = document.getElementById('query').value.trim();
+    state.number = /^[0-9]+$/.test(state.query) ? state.query : '';
+    state.group = ''; loadFolders();
+  });
+  document.getElementById('clear-search').addEventListener('click', () => {
+    document.getElementById('query').value = ''; state.query = ''; state.number = ''; state.collector = ''; state.set = ''; state.group = ''; loadFolders();
+  });
+  for (const [id, key] of [['browse-mode', 'mode'], ['collector-filter', 'collector'], ['set-filter', 'set'], ['sort-order', 'sort']]) {
+    document.getElementById(id).addEventListener('change', () => {
+      state[key] = document.getElementById(id).value; state.group = '';
+      if (key === 'collector') state.set = '';
+      loadFolders();
+    });
+  }
 }
 if (!document.getElementById('initial-error').textContent.trim()) {
   if (document.body.dataset.note) openNote(document.body.dataset.note); else loadFolders();

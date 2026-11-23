@@ -3,6 +3,8 @@ const SETTINGS = Object.freeze({
   PUBLIC_MODE: false,
   PUBLIC_NOTE_IDS: [], // Explicit reviewed publication allowlist, used only in public mode.
   ACCESS_FILE_ID: '',
+  INDEX_FOLDER_ID: '', // Folder containing index.json and its content-addressed JSON files.
+  INDEX_PARENT_FOLDER_ID: '', // Alternatively, publish Field_notes_index under this folder.
   EXPORT_FILE_ID: '',
   SCAN_ROOT_FOLDER_ID: '', // The Field Notes root, containing collector subfolders.
   MAX_EXPORT_BYTES: 10 * 1024 * 1024,
@@ -12,6 +14,9 @@ const SETTINGS = Object.freeze({
   PUBLIC_IMAGES_PER_MINUTE: 60
 });
 
+function usesIndex_() {
+  return Boolean(SETTINGS.INDEX_FOLDER_ID || SETTINGS.INDEX_PARENT_FOLDER_ID);
+}
 function sha_(value) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value)
     .map(byte => ('0' + (byte & 255).toString(16)).slice(-2)).join('');
@@ -168,6 +173,7 @@ function row_(note) {
     summary_snippet: snippet.length <= 360 ? snippet.join('') : snippet.slice(0, 359).join('') + '…' };
 }
 function listFolders(input) {
+  if (usesIndex_()) return indexedListing_(input);
   const { value } = bundle_(), context = context_(input), matches = matches_(value.notes, context), groups = new Map();
   for (const note of matches) for (const member of memberships_(note, context.mode)) {
     if (!groups.has(member.key)) groups.set(member.key, { key: member.key, name: member.name, rank: member.rank || null, notes: [], confirmed: 0, uncertain: 0 });
@@ -198,6 +204,7 @@ function selectNote_(value, id) {
   return note;
 }
 function loadNote(id, input) {
+  if (usesIndex_()) return indexedNote_(id, input);
   const { value, token } = bundle_(), note = selectNote_(value, id), context = context_(input);
   let siblings = matches_(value.notes, context);
   if (context.group) siblings = siblings.filter(n => memberships_(n, context.mode).some(g => g.key === context.group));
@@ -218,6 +225,9 @@ function doGet(e) {
   page.mode = String(p.mode || 'collector').slice(0, 20);
   page.collector = String(p.collector || '').slice(0, 500); page.group = String(p.group || '').slice(0, 2000);
   page.scanSet = String(p.set || '').slice(0, 4096);
+  page.indexed = usesIndex_() ? 'yes' : '';
+  page.pageNumber = String(p.page || '1').slice(0, 12);
+  page.listPage = String(p.p || '1').slice(0, 12);
   page.sort = String(p.sort || 'number').slice(0, 20); page.appUrl = ScriptApp.getService().getUrl(); page.error = '';
   try { gate_(); } catch (error) { page.error = error.message; }
   return page.evaluate().setTitle('Museum field note transcriptions').addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -244,19 +254,25 @@ function publicBudget_(imageRequest) {
 }
 
 function gate_(imageRequest) {
-  if (!SETTINGS.EXPORT_FILE_ID || (!SETTINGS.PUBLIC_MODE && !SETTINGS.ACCESS_FILE_ID)) {
-    throw new Error('Viewer is not configured. Set the access-gate and export file IDs.');
+  if (!usesIndex_() && (!SETTINGS.EXPORT_FILE_ID || (!SETTINGS.PUBLIC_MODE && !SETTINGS.ACCESS_FILE_ID))) {
+    throw new Error('Viewer is not configured. Set the index folder or the legacy access-gate and export file IDs.');
   }
   if (SETTINGS.PUBLIC_MODE) {
     publicBudget_(imageRequest);
     return; // Owner's Drive access is not visitor authorization; publication is intentional.
   }
   try {
+    if (!SETTINGS.ACCESS_FILE_ID && usesIndex_()) {
+      const folder = DriveApp.getFolderById(SETTINGS.INDEX_FOLDER_ID || SETTINGS.INDEX_PARENT_FOLDER_ID);
+      if (folder.isTrashed()) throw new Error('Removed');
+      folder.getName();
+      return folder;
+    }
     const file = DriveApp.getFileById(SETTINGS.ACCESS_FILE_ID);
     if (file.isTrashed()) throw new Error('Removed');
     file.getName(); // Recheck under USER_ACCESSING on every page and RPC.
   } catch (error) {
-    throw new Error('Access denied. Sign in with an account allowed to read the configured collection access file.');
+    throw new Error('Access denied. Sign in with an account allowed to read the configured collection.');
   }
 }
 
@@ -293,11 +309,16 @@ function scanByPath_(scan) {
 
 function loadImage(request) {
   validateImageRequest_(request);
+  if (usesIndex_()) return indexedImage_(request);
   const { value, token } = bundle_(true);
   if (!request || typeof request !== 'object') throw new Error('Invalid image request.');
   if (token !== request.token) return { status: 'stale_export', message: 'Export changed; reload this note.' };
   const note = selectNote_(value, request.note_id);
-  const scan = note.scans.find(image => image.image_id === request.image_id);
+  return verifiedImage_(note, request.image_id);
+}
+
+function verifiedImage_(note, imageId) {
+  const scan = note.scans.find(image => image.image_id === imageId);
   if (!scan) throw new Error('Image is not part of this note.');
   if (scan.status === 'missing') return { status: 'missing_scan', message: 'Scan missing from the local inventory.' };
   if (scan.status !== 'ready') return { status: 'unavailable', message: 'Inventory scan state: ' + scan.status };
@@ -307,7 +328,7 @@ function loadImage(request) {
   if (scan.drive_file_id && !/^[A-Za-z0-9_-]{10,}$/.test(scan.drive_file_id)) throw new Error('Invalid Drive mapping.');
   if (!scan.drive_file_id && !/^[A-Za-z0-9_-]{10,}$/.test(SETTINGS.SCAN_ROOT_FOLDER_ID)) throw new Error('Invalid collection folder ID.');
   const planned = note.scans.reduce((n, item) => n + (item.size || 0), 0);
-  if (planned > SETTINGS.MAX_NOTE_IMAGE_BYTES || scan.size > SETTINGS.MAX_IMAGE_BYTES) {
+  if ((!usesIndex_() && planned > SETTINGS.MAX_NOTE_IMAGE_BYTES) || scan.size > SETTINGS.MAX_IMAGE_BYTES) {
     return { status: 'too_large', message: 'Scan display limit reached; use the original Drive file.' };
   }
   let file;

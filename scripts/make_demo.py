@@ -13,6 +13,7 @@ from fieldnotes.exports import export_all
 from fieldnotes.images import prepare_request
 from fieldnotes.schema import empty_document, validate_document
 from fieldnotes.storage import Store, digest, encoded, lock
+from fieldnotes.viewer_index import DIRECTORY, viewer_files, write_index
 
 LABEL = "SYNTHETIC EXAMPLE"
 
@@ -67,7 +68,8 @@ def make_demo():
             for page in spec["pages"]:
                 render_card(inputs / page["path"], page)
         previous = store.latest("inventory")
-        inventory = discover(inputs, previous, dict(version=1, groups=groups))
+        sets = sorted({str(Path(p).parent.as_posix()) for p in by_path if p.count("/") >= 2})
+        inventory = discover(inputs, previous, dict(version=1, groups=groups), complete_sets=sets)
         if inventory != previous:
             store.append("inventory", inventory)
         images = {i["image_id"]: i["path"] for i in inventory["images"]}
@@ -76,6 +78,8 @@ def make_demo():
             if not note["active"]:
                 continue
             spec = by_path[images[note["image_ids"][0]]]
+            if spec.get("pending"):
+                continue
             doc = demo_document(note, spec)
             errors, reasons = validate_document(doc, note["image_ids"])
             if errors:
@@ -89,6 +93,8 @@ def make_demo():
             checkpoint_result(store, note, request, dict(execution="complete", text="", document=doc, errors=[],
                               review_reasons=reasons, returned_model=None), [], "synthetic-demo")
         export_all(store, inventory, demo / "exports")
+        files, _ = viewer_files(store, inventory)
+        write_index(demo / "exports" / DIRECTORY, files)
     print("Synthetic viewer export ready in local/demo/exports. Run node scripts/preview.cjs.")
 
 
