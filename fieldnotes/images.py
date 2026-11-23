@@ -49,7 +49,9 @@ def prepare_request(inventory, note, config, profile=None, *, authorities=None):
     if len(note["image_ids"]) > config.max_pages:
         raise ValueError("Note exceeds max_pages; no pages were omitted")
     authorities = deepcopy(authorities or [])
-    prompt = build_prompt(note, profile, authorities)
+    folders = {images[iid]["folder"] for iid in note["image_ids"]}
+    scan_set = next(iter(folders)) if len(folders) == 1 else None
+    prompt = build_prompt(note, profile, authorities, scan_set=scan_set)
     manifest, data = [], []
     size = len(encoded(config.generation())) + len(prompt.encode("utf-8")) * 6 + 8192
     for page_number, iid in enumerate(note["image_ids"], 1):

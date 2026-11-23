@@ -9,6 +9,30 @@ from .helpers import Workspace, jpeg
 
 
 class DiscoveryTests(Workspace):
+    def test_prepared_prompt_uses_exact_scan_set_for_the_whole_card(self):
+        folders = ["Carriker/set1", "Carriker/set2", "Carriker/set3", "Carriker/set20", "Other/set2"]
+        log = self.root / "card-backs.txt"
+        log.write_text("\n".join(f"{folder} | front.jpg | back.jpg" for folder in folders), encoding="utf-8")
+        for folder in folders:
+            jpeg(self.inputs / folder / "front.jpg", "blue")
+            jpeg(self.inputs / folder / "back.jpg", "white")
+        inventory = discover(self.inputs, card_back_log=log, complete_sets=folders)
+        for note in inventory["notes"]:
+            provenance = prepare_request(inventory, note, self.config)["provenance"]
+            folder = provenance["images"][0]["path"].rsplit("/", 1)[0]
+            with self.subTest(folder=folder):
+                prompt = provenance["prompt"]
+                self.assertEqual([page["side"] for page in provenance["images"]], ["Front", "Back"])
+                self.assertEqual("mixes single-sided" in prompt, folder == "Carriker/set1")
+                self.assertEqual("broad wavy strokes" in prompt, folder in {"Carriker/set2", "Carriker/set3"})
+
+        group = dict(key="mixed", paths=["Carriker/set2/front.jpg", "Other/set2/back.jpg"],
+                     source="Synthetic grouping across folders")
+        mixed = regroup(inventory, dict(version=1, groups=[group]), card_backs=[])
+        note = next(n for n in mixed["notes"] if n["active"] and n["override"])
+        prompt = prepare_request(mixed, note, self.config)["provenance"]["prompt"]
+        self.assertNotIn("Reading guidance for", prompt)
+
     def test_staging_deletions_and_rescans_are_invisible_until_set_completion(self):
         log = self.root / "card-backs.txt"
         log.write_text("C/set2 | all-pairs", encoding="utf-8")

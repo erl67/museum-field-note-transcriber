@@ -15,6 +15,8 @@ The versioned field-note prompt asks for source-language headings, paragraphs, l
 
 Each supplied page appears once and in order. A page status distinguishes text, blank, cropped, illegible and unrelated material. Marginal and later additions stay attached to their page. Summary, editorial notes and optional translations appear outside the historical reading. The default sends original JPEG bytes, including grouped pages together. An oversized group stops before submission. After checking the physical grouping, an operator may explicitly configure resizing. The manifest records both forms.
 
+Prompt version 1.3 adds reading guidance by exact scan folder in `fieldnotes/prompt.py`. Carriker set 1 contains a mix of single-sided and paired cards. In Carriker sets 2 and 3 every card has a reverse, and crossed-out writing is common there. The guidance calls attention to large X marks and broad wavy strokes across several lines. It asks for the readable wording inside `[deleted: ...]` and a page annotation describing the extent of a broad mark. If the scope is unclear, the reading records that uncertainty. A specimen number or locality found only in a cancelled passage stays in the transcription and cannot supply active specimen metadata. Other folders and groups spanning folders use the general prompt.
+
 ## Choose the operation
 
 | Operation | Behavior on a current complete note |
