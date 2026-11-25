@@ -1,6 +1,6 @@
 # Field Notes Viewer for Google Apps Script
 
-The opening page lists collectors and their scan sets. Selecting a set shows up to 40 whole cards at a time in scan order. Search accepts a collection number, a member of a written range or a stable `note_…` ID. The collector selector scopes the search. A card opens with all its pages in order, front above back. Each scan appears beside its transcription on desktop and above it on a phone. Each image can be enlarged. Page headings on multi-page cards link to that page within the whole card. Previous/next note follows the set or search results.
+The opening page lists collectors and their scan sets. Selecting a set shows up to 40 whole cards at a time in scan order. Search accepts a collection number, a member of a written range or a stable `note_…` ID. The collector selector scopes the search. A card opens with all its pages in order, front above back. Each scan appears beside its transcription on desktop and above it on a phone. Each image can be enlarged. Previous/next note follows the set or search results.
 
 ## Try it offline
 
@@ -45,20 +45,20 @@ Add `--mapping local/drive-mapping.json` to each indexed export or publication t
 
 ## Install the web app
 
-For manual copy-and-paste, prepare a private installation from the repository root. Supply the folder IDs from the two Drive links.
+The repository manifest permits anonymous visitors and runs the web app under the deploying account with read-only Drive access. In public mode, every card in the configured `Field_notes_index/index.json` publication is viewable, including cards awaiting transcription. The Drive folders can remain private.
+
+Build the three complete editor files with your scan-root and Transcriptions folder IDs.
 
 ```powershell
 & $py scripts/build_viewer.py --scan-root <SCAN_FOLDER_ID> --index-parent <TRANSCRIPTIONS_FOLDER_ID>
 ```
 
-Replace both placeholders before running the command. The three files in `local/apps-script-install/` are ready for the Apps Script editor. **Code.gs** includes both server modules and the configured folder IDs. Copy its contents into **Code**, copy **Viewer.html** into **Viewer**, and copy **appsscript.json** into the manifest. Continue at step 3 below. This version resolves the named index folder under Transcriptions on each request. The signed-in visitor's access to that folder supplies the gate.
+Replace the two placeholders with the actual folder IDs.
 
-For an installation directly from the tracked sources:
-
-1. Open a standalone Apps Script project. Add script files **Code** and **Index** from `Code.gs` and `Index.gs`. Add an HTML file named **Viewer** from `Viewer.html`. Enable **Show "appsscript.json" manifest file in editor** in Project Settings and use the supplied `appsscript.json`. These four files are the installation. The HTML embeds its client and CSS.
-2. In the project's private copy of **Code**, set `SETTINGS.INDEX_PARENT_FOLDER_ID` to the Transcriptions folder and `SCAN_ROOT_FOLDER_ID` to the original scan root. Alternatively, set `INDEX_FOLDER_ID` to the generated folder itself. A separate `ACCESS_FILE_ID` is optional for indexed deployments. If used, choose a stable file visible to the intended readers. Leave `EXPORT_FILE_ID` blank and `PUBLIC_MODE` false for this installation. Each reader needs permission to the gate, index folder and original scans.
-3. Save. Use **Deploy → Test deployments → Web app** for an editor test. Authorize read-only Drive access in the intended account. Open the test URL. For the private installed version, use **Deploy → New deployment → Web app**, execute as the **user accessing the web app** and choose **only myself**. The checked-in manifest uses this private configuration.
-4. Copy the assigned `/exec` URL. After changing code, use **Deploy → Manage deployments → Edit**, select a new version and update the same deployment to preserve bookmarks. Data-only updates use the publisher and keep the same web app URL.
+1. In Apps Script, enable **Show "appsscript.json" manifest file in editor** under **Project Settings**.
+2. Replace **Code.gs**, **Viewer.html**, and **appsscript.json** with the corresponding complete files in `local/apps-script-install/`. The generated Code file includes both server modules and both folder IDs.
+3. Save and deploy as a **Web app** with **Execute as me** and access set to **Anyone**. For an existing deployment, choose **Deploy → Manage deployments → Edit → New version → Deploy** to keep its URL.
+4. Open the production `/exec` URL in a signed-out window and check a card and its scans.
 
 The indexed reader rechecks its gate at every page and data request. It opens files by exact names or verified image mappings. Opening a card shows all its transcriptions and requests its JPEGs one at a time in scan order. Each image is verified independently. A scan over 12 MiB receives an explicit display-limit message. Browser requests cannot name a Drive file or filesystem path directly.
 
@@ -70,16 +70,14 @@ The indexed reader rechecks its gate at every page and data request. It opens fi
 - Test a narrow viewport and a fresh signed-in session. If you subsequently choose a restricted multi-user audience, check an intended reader and an account outside that audience. A Drive sync error or revoked permission must leave an explanatory message.
 - Use the [index and migration guide](../../docs/viewer-index.md) for the portable URLs and file contract. Google's [web-app deployment guide](https://developers.google.com/apps-script/guides/web) describes deployment identity and editor-only test URLs.
 
-### Optional public installation
+### Updating the public selection
 
-The private installation is sufficient for development. For a separate public release, review the actual notes, scans, metadata, paths, translations and annotations for disclosure. Build a dedicated private destination with `--viewer-notes local/approved-note-ids.json`. That file is a JSON array of unique active note IDs. Use the identical list for `PUBLIC_NOTE_IDS` in the private script configuration and enable `PUBLIC_MODE`. The manifest membership must match, and direct note/image lookup also enforces the allowlist. An empty list and an empty index display no cards. Re-review changed readings before republishing.
-
-Choose the owner execution identity and intended audience explicitly for such a deployment. Visitors can see the selected reading and verified image bytes using the owner's permissions. Keep the index folder and scan collection private. Public responses omit Drive file IDs, Drive links and private processing history. Existing public request and image budgets apply to the indexed endpoints as well.
+Run the viewer publish command above to include all active cards in the current inventory. To publish a subset, add `--viewer-notes local/approved-note-ids.json` to each publication and put the desired IDs in that JSON array. If you previously passed a selection file to the builder with `--public-notes`, use that file with `--viewer-notes` at publication. Once Drive sync finishes, additions and removals apply to browsing, random picks, bookmarks and scans on the existing web app URL. Apps Script only needs a new deployment for code or configuration changes.
 
 ## Existing installations and styling
 
-An existing installation configured only with `EXPORT_FILE_ID` continues to use its v1 working bundle and earlier full-text/species browser. The 10 MiB whole-export limit still applies there. Set `INDEX_FOLDER_ID` to switch to the indexed reader. Stable note IDs and numeric bookmarks carry across.
+An existing installation configured only with `EXPORT_FILE_ID` continues to use its v1 working bundle and earlier full-text/species browser. Public v1 installations still honor their original `PUBLIC_NOTE_IDS` setting and show zero cards when it is absent. The 10 MiB whole-export limit still applies there. Set `INDEX_FOLDER_ID` to switch to the indexed reader. Stable note IDs and numeric bookmarks carry across.
 
-The first style block is the verbatim `reference.css`. The second block adapts the current website's back link, search spacing and button, transcript wrapping and mobile minimum height. It also styles the set list, collector controls, number highlight, scan dialog and the correspondence Apps Script migration notice below the header. Its future-tense text lives in one `aside` in `Viewer.html`. The site stylesheet could be linked via HTTPS. Embedding these rules keeps the Drive backup and offline preview independent of website availability. [HTML Service restrictions](https://developers.google.com/apps-script/guides/html/restrictions)
+The first style block is the verbatim `reference.css`. The card header includes a 44-pixel, icon-only notepad link for opening a random card. The second block adapts the current website's back link, search spacing and button, transcript wrapping and mobile minimum height. It also styles the set list, collector controls, number highlight, scan dialog and the correspondence Apps Script migration notice below the header. Its future-tense text lives in one `aside` in `Viewer.html`. The site stylesheet could be linked via HTTPS. Embedding these rules keeps the Drive backup and offline preview independent of website availability. [HTML Service restrictions](https://developers.google.com/apps-script/guides/html/restrictions)
 
 After editing `client.js`, run `& $py scripts/build_viewer.py` and the [offline checks](../../docs/testing.md).

@@ -107,6 +107,8 @@
   </style>
   <style id="fieldnotes-controls">
     .site-header .back-home { display: inline-block; color: #225e58; margin-bottom: 16px; text-decoration: underline; }
+    .site-header .random-card { display: inline-flex; width: 44px; height: 44px; vertical-align: middle;
+      align-items: center; justify-content: center; }
     .search-controls { gap: 10px 14px; align-items: center; }
     .search-controls input { flex: 0 1 26rem; }
     .search-controls button[type="submit"] { background: #225e58; color: white; }
@@ -130,7 +132,17 @@
 <body data-indexed="<?= indexed ?>" data-page="<?= pageNumber ?>" data-p="<?= listPage ?>" data-note="<?= noteId ?>" data-number="<?= number ?>" data-query="<?= query ?>" data-mode="<?= mode ?>" data-collector="<?= collector ?>" data-set="<?= scanSet ?>" data-group="<?= group ?>" data-sort="<?= sort ?>" data-url="<?= appUrl ?>">
   <header class="site-header">
     <a class="back-home" href="https://ericlaslo.com/birds/">Bird collection projects</a>
-    <h1><a href="<?= appUrl ?>">Museum field note transcriptions</a></h1>
+    <h1><a href="<?= appUrl ?>">Museum field note transcriptions and scan viewer</a>
+      <a class="random-card" href="<?= appUrl ?>?note=random" aria-label="Open a random card">
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <path fill="#a5aaa8" d="M5 5h23v21l-5 5H5z"/>
+          <path fill="#fffdf2" stroke="#747977" d="M4 4h23v20l-5 5H4z"/>
+          <path fill="#dadfdc" stroke="#747977" stroke-linejoin="round" d="M22 29v-5h5z"/>
+          <path stroke="#98b4c2" stroke-linecap="round" d="M8 12h15M8 16h15M8 20h12M8 24h8"/>
+          <path fill="none" stroke="#505956" stroke-width="2.3" stroke-linecap="round" d="M8 7V3q0-2 2-2m4 6V3q0-2 2-2m4 6V3q0-2 2-2"/>
+        </svg>
+      </a>
+    </h1>
   </header>
   <aside class="deprecation-notice" aria-label="Viewer migration notice">
     <p>This viewer will be rehosted.</p>
@@ -184,6 +196,7 @@ const state = { number: document.body.dataset.number || '', query: document.body
   group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
 let expanded = {};
 const indexed = document.body.dataset.indexed === 'yes';
+const randomCard = document.body.dataset.note === 'random';
 if (indexed) {
   state.p = document.body.dataset.p || '1';
   state.page = document.body.dataset.page || '1';
@@ -394,10 +407,7 @@ function renderSourceText(parent, text, tokens) {
       const pair = element('section', null, root, 'page-pair');
       pair.dataset.imageId = scan ? scan.image_id : page.image_id;
       const title = 'Page ' + number + (scan && scan.side ? ' · ' + scan.side : '');
-      const heading = element('h3', null, pair);
-      if (indexed && scan && note.scans.length > 1) {
-        element('a', title, heading).href = indexedUrl({ note: note.note_id, page: number });
-      } else heading.textContent = title;
+      element('h3', title, pair);
       const columns = element('div', null, pair, 'page-columns');
       const figure = element('figure', null, columns, 'page-column');
       element('p', 'Original scan', figure, 'column-label');
@@ -406,7 +416,7 @@ function renderSourceText(parent, text, tokens) {
       const scanMessage = !scan ? 'No source scan is listed for this transcription.' :
         scan.status === 'missing' ? 'Scan missing from local inventory.' :
         scan.status !== 'ready' ? 'Inventory scan state: ' + scan.status :
-        !canLoad ? 'No Google Drive mapping supplied. Configure the collection scan folder or an image mapping.' : 'Loading scan…';
+        !canLoad ? 'No Google Drive mapping supplied. Configure the collection scan folder or an image mapping.' : (randomCard ? '' : 'Loading scan…');
       const message = element('p', scanMessage, sheet, 'scan-message');
       const caption = element('figcaption', scan ? scan.order + '. ' + scan.path : page.image_id, figure);
       if (canLoad && scan.status === 'ready') jobs.push({ scan, pair, sheet, caption, message });
@@ -536,8 +546,12 @@ function renderNote(result) {
   loadScans(jobs, result);
 }
 function openNote(id) {
-  document.getElementById('message').textContent = 'Loading note…';
-  viewerRequest('loadNote', [id, { ...state }], result => { document.getElementById('message').textContent = ''; renderNote(result); },
+  if (!randomCard) document.getElementById('message').textContent = 'Loading note…';
+  viewerRequest('loadNote', [id, randomCard ? {} : { ...state }], result => {
+    if (randomCard) google.script.history?.replace({}, { note: result.note.note_id }, '');
+    document.getElementById('message').textContent = '';
+    renderNote(result);
+  },
     error => { document.getElementById('message').textContent = error.message;
       const root = document.getElementById('record'); root.hidden = false; renderNavigation(root, null, 'error'); });
 }
@@ -572,7 +586,9 @@ if (indexed) {
   }
 }
 if (!document.getElementById('initial-error').textContent.trim()) {
-  if (document.body.dataset.note) openNote(document.body.dataset.note); else loadFolders();
+  const note = document.body.dataset.note;
+  if (note) openNote(note);
+  else loadFolders();
 }
 
   </script>

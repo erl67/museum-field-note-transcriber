@@ -8,7 +8,11 @@ viewer = ROOT / "apps_script" / "viewer"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--scan-root", help="Original scans' Drive folder ID")
 parser.add_argument("--index-parent", help="Drive folder ID containing Field_notes_index")
+parser.add_argument("--public-notes", metavar="PATH", help=argparse.SUPPRESS)
 args = parser.parse_args()
+if args.public_notes is not None:
+    parser.error("To publish that subset, pass --viewer-notes PATH to fieldnotes publish --viewer-only. "
+                 "Build the viewer using just --scan-root and --index-parent.")
 if any((args.scan_root, args.index_parent)) and not all(
         re.fullmatch(r"[A-Za-z0-9_-]{10,}", v or "") for v in (args.scan_root, args.index_parent)):
     parser.error("Provide both --scan-root and --index-parent with valid Drive folder IDs")

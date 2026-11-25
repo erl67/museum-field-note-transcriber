@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { context, sha, frontend, nodes } = require('../apps_script/viewer/test_support.cjs');
-const files = JSON.parse(fs.readFileSync(0, 'utf8'));
+const { files, subset, empty } = JSON.parse(fs.readFileSync(0, 'utf8'));
 const indexFile = key => files[key];
 const { sandbox: api, indexReads, counts } = context(undefined, { indexFile });
 const home = api.listFolders({});
@@ -45,7 +45,11 @@ for (const [i, pair] of pairs.entries())
   assert.equal(nodes(pair).find(n => n.tag === 'pre').textContent, loaded.note.pages[i].text);
 assert.equal(pairs[0].scrolledIntoView, undefined);
 assert.equal(pairs[1].scrolledIntoView, true);
-assert.ok(nodes(pairs[1]).find(n => n.tag === 'a' && n.href.includes('page=2')));
+for (const [i, pair] of pairs.entries()) {
+  const heading = pair.children.find(n => n.tag === 'h3');
+  assert.ok(heading.textContent.startsWith('Page ' + (i + 1)));
+  assert.equal(heading.children.length, 0);
+}
 assert.ok(!nodes(browser.ids.record).some(n => n.attributes['aria-label'] === 'Scan navigation'));
 assert.equal(counts().imageReads, 0);
 const request = { note_id: id, image_id: loaded.note.scans[1].image_id, token: loaded.token };
@@ -54,6 +58,52 @@ assert.equal(api.loadImage({ ...request, token: 'old' }).status, 'stale_export')
 assert.throws(() => api.loadImage({ ...request, image_id: 'img_' + '0'.repeat(32) }), /part of this note/);
 assert.throws(() => api.loadNote(id, { page: 3 }), /absent/);
 assert.throws(() => context(undefined, { indexFile, deny: true }).sandbox.listFolders({}), /Access denied/);
-assert.throws(() => context(undefined, { indexFile, publicMode: true, allowlist: [] }).sandbox.listFolders({}), /selection differ/);
 const broken = context(undefined, { indexFile: key => key === 'index.json' ? files[key] : '{}' }).sandbox;
 assert.throws(() => broken.listFolders({ set: 'A/set1' }), /content changed/);
+
+// Simulate replacing only the published manifest. Even cached and leftover files
+// stay on Drive throughout the test, and the public viewer keeps the same settings.
+let published = files;
+const live = context(undefined, { publicMode: true,
+  indexFile: key => published[key] ?? files[key] ?? subset[key] ?? empty[key] });
+const publicApi = live.sandbox;
+function randomPick(...draws) {
+  publicApi.Math = Object.create(Math);
+  publicApi.Math.random = () => {
+    assert.ok(draws.length, 'unexpected extra draw');
+    return draws.shift();
+  };
+  const picked = publicApi.loadNote('random', { collector: 'ignored', query: 'ignored', page: 2 });
+  assert.equal(draws.length, 0);
+  assert.equal(picked.context.page, 1);
+  return picked;
+}
+for (const position of [0, 39, 40, 4999, 5000, 9999]) {
+  const before = live.indexReads.length;
+  const picked = randomPick((position + 0.5) / 10000);
+  assert.equal(picked.note.note_id, 'note_' + sha(String(position)).slice(0, 32));
+  const reads = live.indexReads.slice(before);
+  assert.equal(reads.filter(name => name === 'index.json').length, 1);
+  assert.ok(reads.length <= 7, 'one manifest, set directory, up to two browse pages, ID directory, ID bucket and card');
+}
+assert.equal(live.counts().imageReads, 0);
+assert.equal(publicApi.loadNote(id, {}).token, request.token);
+published = subset;
+assert.equal(publicApi.listFolders({}).total, 2);
+assert.equal(publicApi.listFolders({ query: id }).total, 0);
+assert.equal(publicApi.listFolders({ number: '8420' }).total, 0);
+assert.throws(() => publicApi.loadNote(id, {}), /absent/);
+assert.throws(() => publicApi.loadImage(request), /absent/);
+const first = randomPick(0), second = randomPick(0.5);
+assert.equal(first.note.note_id, 'note_' + sha('0').slice(0, 32));
+assert.equal(second.note.note_id, 'note_' + sha('1').slice(0, 32));
+// The third slot is the first card's second set. Either unique card can win the redraw.
+assert.equal(randomPick(0.99, 0).note.note_id, first.note.note_id);
+assert.equal(randomPick(0.99, 0.99).note.note_id, second.note.note_id);
+published = empty;
+assert.equal(publicApi.listFolders({}).total, 0);
+assert.throws(() => publicApi.loadNote('random', {}), /no cards/i);
+assert.throws(() => publicApi.loadNote(first.note.note_id, {}), /absent/);
+assert.throws(() => publicApi.loadImage({ note_id: first.note.note_id, image_id: first.note.scans[0].image_id, token: first.token }), /absent/);
+published = files;
+assert.equal(publicApi.loadNote(id, {}).note.note_id, id);

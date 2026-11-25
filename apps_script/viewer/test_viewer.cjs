@@ -5,6 +5,27 @@ const path = require('node:path');
 const { context, fixture, frontend, nodes, id, bytes, server, html, seal, sha } = require('./test_support.cjs');
 const text = root => nodes(root).map(n => n.textContent).join('\n');
 const request = token => ({ token, note_id: id('note',1), image_id: id('img',2) });
+test('notepad opens a card in one request, silently, and leaves a bookmark to it', () => {
+  assert.match(html, /href="<\?= appUrl \?>\?note=random" aria-label="Open a random card">\s*<svg[^>]*>[\s\S]*?<\/svg>\s*<\/a>/);
+  const f = frontend({ indexed: 'yes', note: 'random', collector: 'Old filter', page: '2' });
+  assert.equal(f.ids.message.textContent, '');
+  assert.equal(f.catalogueCalls.length, 0);
+  assert.deepEqual(f.noteCalls.map(call => call.id), ['random']);
+  assert.deepEqual({ ...f.noteCalls[0].context }, {});
+  assert.equal(f.calls.length, 0);
+  const chosen = context().sandbox.loadNote('random', {});
+  let bookmark;
+  f.sandbox.google.script.history = { replace: (_, params) => { bookmark = { ...params }; } };
+  f.noteCalls[0].success({ ...chosen, collectors: ['Carriker'], context: { collector: 'Carriker', page: 1 } });
+  assert.deepEqual(bookmark, { note: chosen.note.note_id });
+  assert.equal(nodes(f.ids.record).find(n => n.tag === 'h2').textContent, chosen.note.catalogue.title);
+  assert.equal(f.ids.message.textContent, '');
+  assert.doesNotMatch(text(f.ids.record), /loading|choosing|opening a random/i);
+  assert.equal(f.calls[0].req.note_id, chosen.note.note_id);
+  const empty = frontend({ indexed: 'yes', note: 'random' });
+  empty.noteCalls[0].failure(new Error('There are no cards in this catalogue.'));
+  assert.match(empty.ids.message.textContent, /no cards/i);
+});
 function many() {
   const b=fixture(), n=b.notes[0];
   b.notes.push({ ...structuredClone(n), note_id:id('note',2),number_order:1,catalogue:{...n.catalogue,collector:'Avery',collector_folder:'Avery'} });
@@ -41,7 +62,7 @@ test('numeric searches include range members and highlight the original text on 
   note.identifiers = [{ value: '8419-20', evidence: [{ image_id: first.image_id }] }];
   first.text = 'First (8419 – 20) <source> 8429.';
   note.pages[1].text = 'Another reference (8419 – 20)';
-  const publicApi = context(bundle, { publicMode: true }).sandbox;
+  const publicApi = context(bundle, { publicMode: true, allowlist: [note.note_id] }).sandbox;
   for (const [query, expected] of [['8420', '8419 – 20'], ['8419', '8419']]) {
     const row = publicApi.listFolders({ number: query }).folders[0].notes[0];
     assert.equal(row.catalogue.number_label, '8419-20, 8429');
@@ -122,7 +143,7 @@ test('public copy link uses this note and deployment, with a manual clipboard fa
   const bundle = fixture(), nid = bundle.notes[0].note_id, f = frontend({ query: 'private search' });
   f.sandbox.renderNote(context(bundle).sandbox.loadNote(nid, {}));
   assert.ok(!nodes(f.ids.record).some(n => n.textContent === 'Copy note link'));
-  f.sandbox.renderNote(context(bundle, { publicMode: true }).sandbox.loadNote(nid, {}));
+  f.sandbox.renderNote(context(bundle, { publicMode: true, allowlist: [nid] }).sandbox.loadNote(nid, {}));
   const share = nodes(f.ids.record).find(n => n.className === 'letter-share');
   const [button, status, input] = share.children;
   await button.events.click();
@@ -133,12 +154,12 @@ test('public copy link uses this note and deployment, with a manual clipboard fa
   await button.events.click();
   assert.equal(copied, input.value); assert.ok(input.hidden); assert.equal(status.textContent, 'Link copied.');
 });
-test('installation is blank restricted and Drive read-only',()=>{
+test('public installation uses owner read-only access and configures the index by folder',()=>{
   const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'appsscript.json')));
-  assert.equal(manifest.webapp.access,'MYSELF');assert.equal(manifest.webapp.executeAs,'USER_ACCESSING');
+  assert.equal(manifest.webapp.access,'ANYONE_ANONYMOUS');assert.equal(manifest.webapp.executeAs,'USER_DEPLOYING');
   assert.deepEqual(manifest.oauthScopes,['https://www.googleapis.com/auth/drive.readonly']);
-  for(const k of ['ACCESS_FILE_ID','EXPORT_FILE_ID','SCAN_ROOT_FOLDER_ID']) assert.match(server,new RegExp(k+": ''"));
-  assert.match(server,/PUBLIC_MODE: false/);assert.doesNotMatch(server,/setSharing|setTrashed|createFile|UrlFetchApp/);
+  for(const k of ['ACCESS_FILE_ID','EXPORT_FILE_ID','SCAN_ROOT_FOLDER_ID','INDEX_FOLDER_ID','INDEX_PARENT_FOLDER_ID']) assert.match(server,new RegExp(k+": ''"));
+  assert.match(server,/PUBLIC_MODE: true/);assert.doesNotMatch(server,/PUBLIC_NOTE_IDS:|note_[0-9a-f]{32}|setSharing|setTrashed|createFile|UrlFetchApp/);
 });
 test('only intended entry points are callable RPCs',()=>{
   assert.deepEqual([...server.matchAll(/^function (\w+)\(/gm)].map(m=>m[1]).filter(n=>!n.endsWith('_')).sort(),['doGet','listFolders','loadImage','loadNote']);
@@ -302,27 +323,34 @@ test('duplicate paths IDs pages and inconsistent exports fail closed',()=>{
   }
   const b=fixture();b.content_sha256='0'.repeat(64);assert.throws(()=>context(b,{noSeal:true}).sandbox.listFolders({}),/hash is inconsistent/);
 });
-test('public mode requires active records AND explicit note allowlist',()=>{
-  const b=many();const c=context(b,{publicMode:true,allowlist:[id('note',1)]});assert.equal(c.sandbox.listFolders({}).total,1);
-  assert.throws(()=>c.sandbox.loadNote(id('note',2),{}),/absent/);b.notes[0].active=false;assert.equal(c.sandbox.listFolders({}).total,0);
+test('legacy public bundle still limits browsing, bookmarks and random picks to its active selection',()=>{
+  const b = many(), first = id('note',1);
+  assert.equal(context(b, { publicMode: true }).sandbox.listFolders({}).total, 0);
+  const api = context(b, { publicMode: true, allowlist: [first] }).sandbox;
+  assert.equal(api.listFolders({}).total, 1);
+  assert.equal(api.loadNote('random', { query: 'old search' }).note.note_id, first);
+  assert.throws(() => api.loadNote(id('note',2), {}), /absent/);
+  b.notes[0].active = false;
+  assert.equal(api.listFolders({}).total, 0);
+  assert.throws(() => api.loadNote('random', {}), /no cards/i);
 });
 test('public responses search and evidence omit all internal fields',()=>{
   const b=fixture(),n=b.notes[0],secret='PRIVATE_SENTINEL';n.provenance={prompt:secret};n.partial_response=secret;n.review_reasons=[secret];n.future_field=secret;n.catalogue.search_text=secret;n.catalogue.conflicts=[secret];n.scans[0].previous_paths=[secret];
   n.metadata.collector={value:'A',normalized:'A',certainty:'inferred',authority_id:secret,evidence:[{image_id:id('img',2),quote:'A',reviewer:secret}]};
-  const c=context(b,{publicMode:true}),r=c.sandbox.loadNote(id('note',1),{});
+  const c=context(b,{publicMode:true,allowlist:[n.note_id]}),r=c.sandbox.loadNote(n.note_id,{});
   assert.doesNotMatch(JSON.stringify(r),/PRIVATE_SENTINEL|synthetic_drive_|previous_paths|prompt/);
   assert.equal(c.sandbox.listFolders({query:secret}).total,0);assert.equal(r.note.pages[0].text,n.pages[0].text);
 });
 test('public images omit Drive links but keep byte verification',()=>{
-  const c=context(fixture(),{publicMode:true}),t=c.sandbox.loadNote(id('note',1),{}).token,r=c.sandbox.loadImage(request(t));assert.equal(r.status,'ready');assert.equal(r.url,'');
+  const c=context(fixture(),{publicMode:true,allowlist:[id('note',1)]}),t=c.sandbox.loadNote(id('note',1),{}).token,r=c.sandbox.loadImage(request(t));assert.equal(r.status,'ready');assert.equal(r.url,'');
 });
 test('public shared budgets stop reads and reset in a new minute',()=>{
   const cache=new Map(),c=context(fixture(),{publicMode:true,cache,now:100000});for(let i=0;i<120;i++)c.sandbox.listFolders({});
   const blocked=context(fixture(),{publicMode:true,cache,now:100000});assert.throws(()=>blocked.sandbox.listFolders({}),/busy/);assert.equal(blocked.counts().exportReads,0);
-  assert.equal(context(fixture(),{publicMode:true,cache,now:120000}).sandbox.listFolders({}).total,1);
+  assert.equal(context(fixture(),{publicMode:true,allowlist:[id('note',1)],cache,now:120000}).sandbox.listFolders({}).total,1);
 });
 test('public image budget limits repeated images while text remains available',()=>{
-  const c=context(fixture(),{publicMode:true}),t=c.sandbox.loadNote(id('note',1),{}).token;
+  const c=context(fixture(),{publicMode:true,allowlist:[id('note',1)]}),t=c.sandbox.loadNote(id('note',1),{}).token;
   for(let i=0;i<60;i++)c.sandbox.loadImage(request(t));assert.throws(()=>c.sandbox.loadImage(request(t)),/busy/);assert.equal(c.sandbox.listFolders({}).total,1);
 });
 test('public lock or cache failure refuses access before Drive reads',()=>{

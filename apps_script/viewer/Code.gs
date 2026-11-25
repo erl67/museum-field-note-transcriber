@@ -1,7 +1,6 @@
 /** Independent read-only Field Notes viewer. No deployment or IDs supplied. */
 const SETTINGS = Object.freeze({
-  PUBLIC_MODE: false,
-  PUBLIC_NOTE_IDS: [], // Explicit reviewed publication allowlist, used only in public mode.
+  PUBLIC_MODE: true,
   ACCESS_FILE_ID: '',
   INDEX_FOLDER_ID: '', // Folder containing index.json and its content-addressed JSON files.
   INDEX_PARENT_FOLDER_ID: '', // Alternatively, publish Field_notes_index under this folder.
@@ -74,7 +73,11 @@ function bundle_(imageRequest) {
     if (note.execution === 'complete' && (note.pages.length !== note.scans.length || note.pages.some((p, i) => p.image_id !== note.scans[i].image_id)))
       throw new Error('Complete note page coverage differs from its scans.');
   }
-  if (SETTINGS.PUBLIC_MODE) value.notes = value.notes.filter(n => n.active === true && SETTINGS.PUBLIC_NOTE_IDS.includes(n.note_id));
+  if (SETTINGS.PUBLIC_MODE) {
+    // Older installations using a single staff export keep their explicit selection.
+    const selected = new Set(SETTINGS.PUBLIC_NOTE_IDS || []);
+    value.notes = value.notes.filter(n => n.active === true && selected.has(n.note_id));
+  }
   return { value, token: sha_(raw) };
 }
 function scalars_(source, keys) {
@@ -207,10 +210,16 @@ function selectNote_(value, id) {
   return note;
 }
 function loadNote(id, input) {
+  if (id === 'random') input = {};
   if (usesIndex_()) return indexedNote_(id, input);
-  const { value, token } = bundle_(), note = selectNote_(value, id), context = context_(input);
+  const { value, token } = bundle_(), context = context_(input);
   let siblings = matches_(value.notes, context);
   if (context.group) siblings = siblings.filter(n => memberships_(n, context.mode).some(g => g.key === context.group));
+  if (id === 'random') {
+    if (!siblings.length) throw new Error('There are no cards in this catalogue.');
+    id = siblings[Math.floor(Math.random() * siblings.length)].note_id;
+  }
+  const note = selectNote_(value, id);
   const index = siblings.findIndex(n => n.note_id === id);
   const display = SETTINGS.PUBLIC_MODE ? publicNote_(note) : { ...note, catalogue: { ...note.catalogue, scan_sets: scanSets_(note) }, scans: note.scans.map(s => ({ ...s,
     mapping_status: s.drive_file_id ? 'mapped' : SETTINGS.SCAN_ROOT_FOLDER_ID ? 'folder_lookup' : 'missing_mapping' })) };

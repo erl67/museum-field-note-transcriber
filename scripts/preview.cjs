@@ -82,7 +82,9 @@ function runner(success, failure) {
   return { withSuccessHandler:fn=>runner(fn,failure), withFailureHandler:fn=>runner(success,fn),
     listFolders:call('listFolders'),loadNote:call('loadNote'),loadLetter:call('loadLetter'),loadImage:call('loadImage') };
 }
-window.google={script:{run:runner(()=>{},console.error)}};
+window.google={script:{run:runner(()=>{},console.error),history:{
+  replace:(state, params) => window.history.replaceState(state, '', '?' + new URLSearchParams(params))
+}}};
 </script>`;
   return template.replace(/<\?=\s*(\w+)\s*\?>/g, (_, key) => escapeHtml(values[key])).replace('</head>', bridge + '</head>');
 }

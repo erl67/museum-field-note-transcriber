@@ -84,9 +84,11 @@ function context(bundle = fixture(), options = {}) {
     .replace(/\bEXPORT_FILE_ID:\s*'[^']*'/, "EXPORT_FILE_ID: 'export'")
     .replace("INDEX_FOLDER_ID: ''", "INDEX_FOLDER_ID: " + JSON.stringify(options.indexFile && !options.indexParent ? 'index' : ''))
     .replace("INDEX_PARENT_FOLDER_ID: ''", "INDEX_PARENT_FOLDER_ID: " + JSON.stringify(options.indexParent ? 'parent' : ''))
-    .replace(/\bPUBLIC_MODE:\s*false/, 'PUBLIC_MODE: ' + Boolean(options.publicMode))
-    .replace(/\bPUBLIC_NOTE_IDS:\s*\[\]/, 'PUBLIC_NOTE_IDS: ' + JSON.stringify(options.allowlist || bundle.notes.map(n => n.note_id)))
+    .replace(/\bPUBLIC_MODE:\s*true/, 'PUBLIC_MODE: ' + Boolean(options.publicMode))
     .replace(/\bSCAN_ROOT_FOLDER_ID:\s*'[^']*'/, 'SCAN_ROOT_FOLDER_ID: ' + JSON.stringify(options.scanRoot || ''));
+  if (options.allowlist) {
+    code = code.replace('const SETTINGS = Object.freeze({', 'const SETTINGS = Object.freeze({\n  PUBLIC_NOTE_IDS: ' + JSON.stringify(options.allowlist) + ',');
+  }
   vm.runInContext(code, sandbox);
   return { sandbox, lookups, indexReads, cache, counts: () => ({ gateReads, imageReads, folderReads, exportReads, lockReleases }) };
 }

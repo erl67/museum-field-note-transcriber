@@ -43,9 +43,6 @@ function indexReader_(imageRequest) {
   if (master.schema_version !== 2 || master.export_kind !== 'fieldnotes-index' ||
       !Array.isArray(master.collectors) || !(master.page_size > 0))
     throw new Error('Unsupported field notes index.');
-  if (SETTINGS.PUBLIC_MODE &&
-      master.members_sha256 !== sha_([...new Set(SETTINGS.PUBLIC_NOTE_IDS)].sort().join('\n')))
-    throw new Error('Public index and configured note selection differ.');
   function object(ref) {
     if (typeof ref !== 'string' || !/^[a-f0-9]{64}$/.test(ref)) throw new Error('Invalid index reference.');
     return read(ref + '.json', ref);
@@ -87,7 +84,7 @@ function setRows_(reader, set, p) {
 
 function noteRoute_(reader, id) {
   if (!validId_(id, 'note')) throw new Error('Invalid note ID.');
-  if (SETTINGS.PUBLIC_MODE && !SETTINGS.PUBLIC_NOTE_IDS.includes(id)) return null;
+  // Only the current publication can supply a route, including for bookmarked cards and scans.
   const bucket = reader.object(reader.master.routes)[id.slice(5, 7)];
   return bucket ? reader.object(bucket)[id] || null : null;
 }
@@ -96,6 +93,31 @@ function rowAt_(reader, set, index) {
   if (index < 0 || index >= set.count) return null;
   const size = reader.master.page_size;
   return setRows_(reader, set, 1 + Math.floor(index / size))[index % size];
+}
+
+function randomIndexedNoteId_(reader) {
+  if (!reader.master.count) throw new Error('There are no cards in this catalogue.');
+  const sets = reader.master.collectors.flatMap(collector => collector.sets);
+  let remaining = sets.reduce((sum, set) => sum + set.count, 0);
+  const swaps = new Map();
+  while (remaining > 0) {
+    const draw = Math.floor(Math.random() * remaining);
+    let offset = swaps.get(draw) ?? draw;
+    for (const set of sets) {
+      if (offset < set.count) {
+        const row = rowAt_(reader, set, offset);
+        if (!row) throw new Error('Card position missing from the published index.');
+        if (row.sets[0] === set.name) return row.note_id;
+        break;
+      }
+      offset -= set.count;
+    }
+    // A card filed in two sets gets one chance, in its first set. Remove the
+    // duplicate slot by swapping in the last undrawn slot, then draw again.
+    remaining--;
+    swaps.set(draw, swaps.get(remaining) ?? remaining);
+  }
+  throw new Error('The published index is missing its primary card entries.');
 }
 
 function identifierRows_(reader, ctx) {
@@ -145,7 +167,9 @@ function indexedListing_(input) {
 }
 
 function indexedNote_(id, input) {
-  const reader = indexReader_(false), ctx = indexContext_(input), route = noteRoute_(reader, id);
+  const reader = indexReader_(false), ctx = indexContext_(input);
+  if (id === 'random') id = randomIndexedNoteId_(reader);
+  const route = noteRoute_(reader, id);
   if (!route) throw new Error('Note is absent from this export.');
   const note = reader.object(route.ref);
   if (note.note_id !== id || ctx.page > note.scans.length) throw new Error('Note or page is absent from this export.');

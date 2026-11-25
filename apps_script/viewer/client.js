@@ -16,6 +16,7 @@ const state = { number: document.body.dataset.number || '', query: document.body
   group: document.body.dataset.group || '', sort: document.body.dataset.sort || 'number' };
 let expanded = {};
 const indexed = document.body.dataset.indexed === 'yes';
+const randomCard = document.body.dataset.note === 'random';
 if (indexed) {
   state.p = document.body.dataset.p || '1';
   state.page = document.body.dataset.page || '1';
@@ -226,10 +227,7 @@ function renderSourceText(parent, text, tokens) {
       const pair = element('section', null, root, 'page-pair');
       pair.dataset.imageId = scan ? scan.image_id : page.image_id;
       const title = 'Page ' + number + (scan && scan.side ? ' · ' + scan.side : '');
-      const heading = element('h3', null, pair);
-      if (indexed && scan && note.scans.length > 1) {
-        element('a', title, heading).href = indexedUrl({ note: note.note_id, page: number });
-      } else heading.textContent = title;
+      element('h3', title, pair);
       const columns = element('div', null, pair, 'page-columns');
       const figure = element('figure', null, columns, 'page-column');
       element('p', 'Original scan', figure, 'column-label');
@@ -238,7 +236,7 @@ function renderSourceText(parent, text, tokens) {
       const scanMessage = !scan ? 'No source scan is listed for this transcription.' :
         scan.status === 'missing' ? 'Scan missing from local inventory.' :
         scan.status !== 'ready' ? 'Inventory scan state: ' + scan.status :
-        !canLoad ? 'No Google Drive mapping supplied. Configure the collection scan folder or an image mapping.' : 'Loading scan…';
+        !canLoad ? 'No Google Drive mapping supplied. Configure the collection scan folder or an image mapping.' : (randomCard ? '' : 'Loading scan…');
       const message = element('p', scanMessage, sheet, 'scan-message');
       const caption = element('figcaption', scan ? scan.order + '. ' + scan.path : page.image_id, figure);
       if (canLoad && scan.status === 'ready') jobs.push({ scan, pair, sheet, caption, message });
@@ -368,8 +366,12 @@ function renderNote(result) {
   loadScans(jobs, result);
 }
 function openNote(id) {
-  document.getElementById('message').textContent = 'Loading note…';
-  viewerRequest('loadNote', [id, { ...state }], result => { document.getElementById('message').textContent = ''; renderNote(result); },
+  if (!randomCard) document.getElementById('message').textContent = 'Loading note…';
+  viewerRequest('loadNote', [id, randomCard ? {} : { ...state }], result => {
+    if (randomCard) google.script.history?.replace({}, { note: result.note.note_id }, '');
+    document.getElementById('message').textContent = '';
+    renderNote(result);
+  },
     error => { document.getElementById('message').textContent = error.message;
       const root = document.getElementById('record'); root.hidden = false; renderNavigation(root, null, 'error'); });
 }
@@ -404,5 +406,7 @@ if (indexed) {
   }
 }
 if (!document.getElementById('initial-error').textContent.trim()) {
-  if (document.body.dataset.note) openNote(document.body.dataset.note); else loadFolders();
+  const note = document.body.dataset.note;
+  if (note) openNote(note);
+  else loadFolders();
 }

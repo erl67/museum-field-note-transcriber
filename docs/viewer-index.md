@@ -23,6 +23,7 @@ The home response contains set names and counts. The index contains no embedded 
 ### Order, search and updates
 
 - Sets follow the first scan's natural collector/folder/filename order. Each set lists whole cards. A card with pages filed in multiple sets is visible from each such set, and keeps its original page order. Collector and archive totals count the card once.
+- The header's notepad opens a uniformly random published card. The server draws a position using set counts, reads the corresponding browse page and opens that card in one browser request. Only the first set membership counts for cards filed across sets. The JPGs load separately.
 - Exact search trims outer whitespace and folds ASCII case. Leading zeros and punctuation remain significant. Range and compound-number lookups use the existing field-note rules, including abbreviated endpoints and padded ranges. The reader returns every match and paginates the result. A stable archival ID can also be entered in the search field.
 - A note's content hash binds each scan request to the reading the visitor opened. A changed card prompts a reload. An unchanged card can remain open through an unrelated update. Readers reject missing, duplicate or mismatched index resources. Small immutable objects can use Apps Script's per-user cache after an access check.
 - Publication reuses the existing ownership journal, archive-before-replacement checks and atomic local writes. The manifest is written last. Drive for desktop transfers each file independently. A partially synced publication can require a reload once synchronization finishes.
@@ -38,6 +39,7 @@ Append these parameters to the Apps Script deployment URL. The planned website b
 | Set, second list page | `?collector=Carriker&set=Carriker%2Fset1&p=2` |
 | Number across collectors | `?number=8420` |
 | Number in one collector | `?number=8420&collector=Carriker` |
+| Random whole card, then a bookmark to the chosen card | `?note=random` |
 | Whole card, scrolled to the second scan | `?note=<stable-note-id>&page=2` |
 
 The reader accepts existing numeric shortcuts and `q` / `query` aliases for the identifier field. Copied note links omit search context. Links inside a set or result list carry the browse context so previous/next and the return link lead to the matching rows. Browser Back works with ordinary page URLs. Existing website rules for correspondence aliases and bare egg numbers should continue to resolve to their current readers.

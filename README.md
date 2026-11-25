@@ -120,7 +120,7 @@ These are independent operations, each using a staff-prepared file. The review g
 
 ## Field Notes Viewer
 
-The Google Apps Script reader opens with collectors and scan sets. Browse cards in scanner order, search by written number or stable note ID, and share a link to an individual page. Each scan opens beside its own transcription.
+The Google Apps Script reader opens with collectors and scan sets. Browse cards in scanner order, search by written number or stable note ID, and share a link to an individual page. Each scan opens beside its own transcription. Click the notepad in the header to open a random card. Publishing an updated viewer index updates the public catalogue and its random selection at the same web app URL.
 
 ```powershell
 # Build the private reader index from the current inventory and reviewed readings.

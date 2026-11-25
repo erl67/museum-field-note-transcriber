@@ -163,8 +163,8 @@ class ViewerIndexTests(Workspace):
         files, _ = viewer_files(self.store, self.inventory)
         base = next(v for v in map(json.loads, files.values()) if isinstance(v, dict) and "note_id" in v)
         specs = json.loads((ROOT / "test/inputs/demo.json").read_text("utf-8"))["notes"]
-        def cards():
-            for i in range(10000):
+        def cards(count):
+            for i in range(count):
                 note = deepcopy(base)
                 collector = "A" if i < 5000 else "B"
                 folder = collector + "/set1"
@@ -182,7 +182,14 @@ class ViewerIndexTests(Workspace):
                 yield note
         # Supply the real resolver with the Python-produced bytes, without creating
         # ten thousand synced files or using a Google account.
-        generated, _ = build_index(cards())
+        generated, _ = build_index(cards(10000))
         self.assertLess(len(generated["index.json"]), 2000)
+        pair = list(cards(2))
+        pair[0]["scans"][1].update(folder="A/set2", path="A/set2/0-1.jpg")
+        pair[0]["catalogue"]["scan_sets"].append("A/set2")
+        subset, _ = build_index(pair)
+        empty, _ = build_index([])
+        snapshots = {"files": generated, "subset": subset, "empty": empty}
         subprocess.run(["node", "test/index_roundtrip.cjs"], cwd=ROOT,
-                       input=encoded({n: raw.decode() for n, raw in generated.items()}), check=True)
+                       input=encoded({name: {n: raw.decode() for n, raw in snapshot.items()}
+                                      for name, snapshot in snapshots.items()}), check=True)
