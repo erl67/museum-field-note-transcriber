@@ -20,7 +20,7 @@ Remove-Item Env:FIELDNOTES_TEST_ROOT, Env:FIELDNOTES_TEST_SET
 
 | Area | What is exercised |
 | --- | --- |
-| Inventory and preparation | Case-insensitive JPEGs, damaged/missing/duplicate items, unsupported files, grouping, moved paths, reuse of a reconciled path, source changes, EXIF orientation, image limits and no omitted pages. |
+| Inventory and preparation | Case-insensitive JPEGs, damaged/missing/duplicate items, ignored non-JPEG reference files, grouping, moved paths, reuse of a reconciled path, source changes, EXIF orientation, image limits and no omitted pages. |
 | Reading and review | Multiple passages and numbers, absent species, symbols and edits, alternative taxa, supported precision, invalid and dangling evidence, failure preservation, independent approvals, stale reviews, reviewed authorities and profile isolation. |
 | Execution and storage | Real SDK with local HTTP responses, bounded retries, pause/stop conditions, quota persistence and process contention, interrupted-attempt recovery, partial output, failure after checkpoint, 48-hour selection, old pending continuation, fresh revisions and unknown usage. |
 | Export and publication | Offline regeneration, quoted Unicode CSV, formula handling, output-name collisions, ownership, archives, interruption recovery, overlapping paths and safe scan exclusion. Publication tests use temporary synthetic destinations only. |

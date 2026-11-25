@@ -39,7 +39,7 @@ async function check(browser, size) {
   await notes.locator('summary').filter({hasText:'Carriker'}).click();
   await notes.getByRole('link', {name: 'Loose cards'}).click();
   await notes.getByRole('link', {name: /^Read note:.*12a/}).click();
-  await notes.locator('.scan-sheet img').waitFor();
+  await notes.locator('.scan-sheet img').nth(1).waitFor();
   const id = new URL(notes.url()).searchParams.get('note');
   const bundle = JSON.parse(fs.readFileSync(path.join(demo, 'exports/Field_notes_viewer.json')));
   const note = bundle.notes.find(n => n.note_id === id);
@@ -61,26 +61,35 @@ async function check(browser, size) {
     return route.abort();
   });
   await letters.goto(origin + '/birds/letter-reader/?letter=' + id);
-  for (const page of [notes, letters]) await page.waitForFunction(() => document.querySelector('.scan-sheet img')?.naturalWidth > 0);
+  await letters.locator('.page-pair').nth(1).scrollIntoViewIfNeeded();
+  for (const page of [notes, letters]) await page.waitForFunction(() => {
+    const images = [...document.querySelectorAll('.scan-sheet img')];
+    return images.length === 2 && images.every(img => img.naturalWidth > 0);
+  });
   const panels = ['.site-header', 'h1', '.letter-nav', '.letter-heading h2', '.page-columns', '.scan-sheet', '.transcript-sheet pre', '.site-footer'];
   assert.deepEqual(await appearance(notes, panels), await appearance(letters, panels));
-  const [actual] = await geometry(notes), [reference] = await geometry(letters);
-  assert.equal(actual.width, reference.width);
-  assert.equal(actual.textWidth, reference.textWidth);
-  assert.deepEqual(actual.original, reference.original);
-  assert.equal(actual.fit, 'contain');
-  assert.ok(Math.abs(actual.width / actual.height - actual.original[0] / actual.original[1]) < 0.01);
-  if (size.width > 760) assert.ok(actual.textLeft > 0 && actual.textWidth > actual.width);
-  else assert.ok(actual.textLeft === 0 && actual.textTop > actual.height);
-  assert.equal(await notes.locator('.transcript-sheet pre').first().textContent(), note.pages[0].text);
+  const actual = await geometry(notes), reference = await geometry(letters);
+  assert.equal(actual.length, reference.length);
+  for (const [i, pair] of actual.entries()) {
+    assert.equal(pair.imageId, reference[i].imageId);
+    assert.equal(pair.width, reference[i].width);
+    assert.equal(pair.textWidth, reference[i].textWidth);
+    assert.deepEqual(pair.original, reference[i].original);
+    assert.equal(pair.fit, 'contain');
+    assert.ok(Math.abs(pair.width / pair.height - pair.original[0] / pair.original[1]) < 0.01);
+    if (size.width > 760) assert.ok(pair.textLeft > 0 && pair.textWidth > pair.width);
+    else assert.ok(pair.textLeft === 0 && pair.textTop > pair.height);
+    assert.equal(await notes.getByRole('region', {name:'Transcription, page ' + (i + 1)}).locator('pre').first().textContent(), note.pages[i].text);
+  }
   for (const [label, page] of [['notes', notes], ['website', letters]])
     await page.locator('.page-pair').first().screenshot({path:path.join(output, label + '-page-' + size.width + '.png')});
-  await notes.getByRole('button', {name:'Enlarge scan'}).click();
+  await notes.getByRole('button', {name:'Enlarge scan'}).nth(1).click();
   await notes.locator('dialog[open]').waitFor();
   await notes.keyboard.press('Escape');
-  await notes.getByRole('link', {name:'Next scan'}).click();
+  await notes.getByRole('link', {name:/^Page 2\b/}).click();
   await notes.getByRole('region', {name:'Transcription, page 2'}).waitFor();
-  assert.equal(await notes.locator('.transcript-sheet pre').first().textContent(), note.pages[1].text);
+  assert.equal(new URL(notes.url()).searchParams.get('page'), '2');
+  assert.equal(await notes.locator('.page-pair').count(), 2);
   await notes.goBack();
   await notes.getByRole('region', {name:'Transcription, page 1'}).waitFor();
   await notes.locator('#query').fill('0012');
@@ -96,7 +105,7 @@ async function check(browser, size) {
   assert.equal(await notes.locator('.transcript-sheet mark').textContent(), '8419-20');
   assert.deepEqual(errors, []);
   await context.close();
-  return {viewport:size, firstPage:actual};
+  return {viewport:size, firstPage:actual[0], secondPage:actual[1]};
 }
 
 (async () => {

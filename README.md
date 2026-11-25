@@ -16,12 +16,18 @@ $py = '.\.venv\Scripts\python.exe'
 $env:PYTHONUTF8 = '1'
 $scans = 'G:\My Drive\Field Notes'
 # Once scanning is finished for this set:
-& $py -m fieldnotes dry-run --input $scans --complete-set 'Carriker/set1'
-& $py -m fieldnotes inventory --input $scans --complete-set 'Carriker/set1'
+& $py -m fieldnotes dry-run --input $scans --collector Carriker --complete-set 'Carriker/set1'
+if ($LASTEXITCODE -eq 0) {
+    & $py -m fieldnotes inventory --input $scans --collector Carriker --complete-set 'Carriker/set1'
+}
 & $py -m fieldnotes show --collector Carriker
 ```
 
 The dry run reads the selected scans, builds complete requests in memory, and prints readiness. It needs no key and creates no journal, lock, quota reservation or report. Inventory saves stable IDs, relative paths, original hashes, dimensions, and issues under `local/collection`. It also writes one readable report per note and a spreadsheet catalogue under `local/exports`. Both operations open originals for reading only. To retain the identity of an externally moved inventoried scan, reconcile its path **before** inventorying its new location. See [grouping and path changes](docs/review.md).
+
+New discovery admits only `.jpg` and `.jpeg` filenames, case-insensitively. Reference shortcuts (`.lnk`), text files, and other non-JPEG files are ignored without opening or changing them. A damaged file with a JPEG extension still reports an error.
+
+On inventory or dry-run, `--collector Carriker` limits discovery to the Carriker folder, excluding files and staging folders directly under Field Notes such as `Field Notes/set4`. Inventory saves this scope, so later inventory and dry-run commands retain it even when the option is omitted. Repeat `--collector` for each intended collector when expanding the scope. Completed-set admission remains separate: an unfinished `Carriker/set3` stays out until explicitly admitted with `--complete-set`.
 
 ## Scan a pile of cards
 
@@ -32,9 +38,23 @@ In a mixed pile such as `Carriker/set1`, scan a two-sided card front first, then
 ```text
 Carriker/set1 | IMG_2020_01_02_11_00_10S.jpg
 Carriker/set2 | all-pairs
+Carriker/set3 | all-pairs
 ```
 
-The `all-pairs` line configures the whole second pile. Scan every card into `Carriker/set2` front first, followed by its back, even when blank. Inventory pairs scans 1–2, 3–4, and so on. A final front waits for its back before transcription. A dry run previews the grouping. Inventory saves it and keeps the front's note ID. You can still specify both filenames for exceptions. [Scanner log and grouping details](docs/review.md#record-two-sided-cards)
+Each `all-pairs` line configures its named pile. Scan every card front first, followed by its back, even when blank. Inventory pairs scans 1–2, 3–4, and so on. A final front waits for its back before transcription. A dry run previews the grouping. Inventory saves it and keeps the front's note ID. You can still specify both filenames for exceptions. [Scanner log and grouping details](docs/review.md#record-two-sided-cards)
+
+For a completed third pile, add `Carriker/set3 | all-pairs` once to the scanner log, then use `dry-run --input $scans --complete-set 'Carriker/set3'` and `inventory --input $scans --complete-set 'Carriker/set3'`. The input root stays at Field Notes. Here, `--complete-set` means scanning is finished. Transcriptions can still be incomplete. `transcribe --pending --collector Carriker` includes the newly inventoried set and unfinished cards from the earlier sets.
+
+If a two-sided pile is missing a back in the middle, defer the whole pile until its chronological sequence is repaired; otherwise later fronts and backs can be paired incorrectly. When pasting PowerShell commands interactively, put inventory inside the success branch so a failed dry run cannot be followed by inventory:
+
+```powershell
+& $py -m fieldnotes dry-run --input $scans --complete-set 'Carriker/set3'
+if ($LASTEXITCODE -eq 0) {
+    & $py -m fieldnotes inventory --input $scans --complete-set 'Carriker/set3'
+} else {
+    Write-Error 'Dry run failed; the set was not inventoried.'
+}
+```
 
 ## Find and read a note
 

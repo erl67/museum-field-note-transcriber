@@ -31,6 +31,8 @@ def parser():
     for name in ("inventory", "dry-run"):
         sub = commands.add_parser(name)
         sub.add_argument("--input", required=True)
+        sub.add_argument("--collector", dest="collectors", action="append", metavar="FOLDER",
+                         help="Only scan this top-level collector folder; inventory saves the scope. Repeat for more collectors.")
         sub.add_argument("--complete-set", action="append", default=[], metavar="COLLECTOR/SET",
                          help="Admit new scans in this finished set (repeat for more sets). Dry-run only previews.")
         sub.add_argument("--overrides")
@@ -186,7 +188,7 @@ def run(args):
         previous = store.latest("inventory")
         overrides = load_file(args.overrides) if args.overrides else None
         inventory = discover(args.input, previous, overrides, generated_paths(store, args.input),
-                             card_back_log=store.root / LOG_NAME, complete_sets=args.complete_set)
+                             card_back_log=store.root / LOG_NAME, complete_sets=args.complete_set, collectors=args.collectors)
         separate_from_sources(inventory, store.root, config.quota_file)
         profile = load_profile(args.profile)
         context = request_authorities(authorities(store))
@@ -239,7 +241,7 @@ def run(args):
         if args.command == "inventory":
             inventory = discover(args.input, store.latest("inventory"), load_file(args.overrides) if args.overrides else None,
                                  generated_paths(store, args.input), card_back_log=store.root / LOG_NAME,
-                                 complete_sets=args.complete_set)
+                                 complete_sets=args.complete_set, collectors=args.collectors)
             store.append("inventory", inventory)
             count = export_all(store, inventory, args.output)
             print(f"Saved {count} note records and {len(inventory['images'])} files to {args.output}; zero requests")

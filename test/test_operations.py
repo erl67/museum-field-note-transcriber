@@ -35,6 +35,33 @@ class CliTests(Workspace):
             (self.inputs/'C/card.jpg').unlink()
             before=self.store.journal.read_bytes();self.assertEqual(self.call('export','--output',str(out))[0],0)
         self.assertEqual(before,self.store.journal.read_bytes());self.assertFalse(Path(self.config.quota_file).exists())
+
+    def test_inventory_remembers_collector_scope_and_ignores_top_level_staging(self):
+        for name in ("Carriker/set1/done.jpg", "Carriker/set3/draft.jpg", "set4/draft.jpg", "loose.jpg",
+                     "Other/set1/card.jpg"):
+            jpeg(self.inputs / name)
+        scope = ("--collector", "Carriker", "--complete-set", "Carriker/set1")
+        before = self.snapshot()
+        code, text = self.call("dry-run", "--input", str(self.inputs), *scope)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(text.count("READY "), 1)
+        self.assertEqual(before, self.snapshot())
+        code, text = self.call("inventory", "--input", str(self.inputs), *scope, "--output", str(self.root / "exports"))
+        self.assertEqual(code, 0, text)
+        first = self.store.latest("inventory")
+        self.assertEqual(first["collector_scope"], ["Carriker"])
+        self.assertEqual([i["path"] for i in first["images"]], ["Carriker/set1/done.jpg"])
+        jpeg(self.inputs / "set4/another.jpg")
+        code, text = self.call("inventory", "--input", str(self.inputs), "--output", str(self.root / "exports"))
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.store.latest("inventory"), first)
+        before = self.store.journal.read_bytes()
+        code, text = self.call("inventory", "--input", str(self.inputs), "--complete-set", "Other/set1",
+                               "--output", str(self.root / "exports"))
+        self.assertEqual(code, 1)
+        self.assertIn("outside the saved collector scope", text)
+        self.assertEqual(before, self.store.journal.read_bytes())
+
     def test_inventory_dry_run_and_selection_use_the_same_set_and_scanner_log(self):
         for name in ("C/set1/f.jpg", "C/set1/b.jpg", "C/set10/f.jpg", "A/set1/f.jpg", "C/loose.jpg"):
             jpeg(self.inputs / name)

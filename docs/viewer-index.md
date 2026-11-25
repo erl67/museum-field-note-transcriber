@@ -16,7 +16,7 @@ A stable `note_id` identifies a whole physical card or explicitly ordered group.
 | ID directory and buckets | First two hex digits after `note_` select a bucket. Each entry contains a note-object reference and zero-based positions within its sets | Resolving a bookmark or an image request |
 | Number directory and buckets | Exact-label buckets and candidate buckets for decimal ranges. Each carries compact summary rows. The resolver confirms the full label or range and scopes results to the selected collector | Searching an identifier |
 | Note | Catalogue fields, page text, annotations, translations, evidence, summary, review states and ordered original-scan manifest. May include private transport mappings | Opening one card and verifying its selected scan |
-| Original JPEG | Exact source bytes, located by relative path or optional mapped Drive ID | Displaying or enlarging the selected page |
+| Original JPEG | Exact source bytes, located by relative path or optional mapped Drive ID | Opening a card loads each scan in order. Enlargement reuses the displayed image. |
 
 The home response contains set names and counts. The index contains no embedded JPEGs, generation prompts, raw failed responses or technical logs. The journal and staff exports retain the complete history. The local export can retain older immutable objects. Use the managed publisher or the exact file dictionary returned by `viewer_files` to stage only resources reachable in the selected build.
 
@@ -38,7 +38,7 @@ Append these parameters to the Apps Script deployment URL. The planned website b
 | Set, second list page | `?collector=Carriker&set=Carriker%2Fset1&p=2` |
 | Number across collectors | `?number=8420` |
 | Number in one collector | `?number=8420&collector=Carriker` |
-| Specific card, second scan | `?note=<stable-note-id>&page=2` |
+| Whole card, scrolled to the second scan | `?note=<stable-note-id>&page=2` |
 
 The reader accepts existing numeric shortcuts and `q` / `query` aliases for the identifier field. Copied note links omit search context. Links inside a set or result list carry the browse context so previous/next and the return link lead to the matching rows. Browser Back works with ordinary page URLs. Existing website rules for correspondence aliases and bare egg numbers should continue to resolve to their current readers.
 

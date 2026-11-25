@@ -4,6 +4,8 @@ The default source of truth is `local/collection/journal.jsonl` with its sibling
 
 Run `& $py -m fieldnotes export` to rebuild the current collection under `local/exports`. This reads saved versions and review decisions, including retained records with unavailable scans. It does not need a service key, mounted scan root, or new reading.
 
+Sets do not need all their transcriptions finished before export or publication. Both the set text readers and the indexed viewer include every active inventoried card, preserving its scan references and current status. Completed readings appear normally; failed or unprocessed cards indicate that no complete transcription is available. Partial raw responses remain in the local detailed reports and history, rather than being presented as completed readings in the indexed viewer. After another transcription run, repeat export/publication to update the same cards. Admitting a set with `inventory --complete-set` means its scanning is finished, not its transcription.
+
 | Output | Use |
 | --- | --- |
 | `readable/note_<id>.txt` | One file for every note, including unavailable or failed records. Whole pages with original path and image ID, catalogue details, summary, notes, translations, states and review reasons. |

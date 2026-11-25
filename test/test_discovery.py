@@ -9,6 +9,19 @@ from .helpers import Workspace, jpeg
 
 
 class DiscoveryTests(Workspace):
+    def test_collector_scope_cannot_silently_drop_previously_saved_scans(self):
+        jpeg(self.inputs / "A/one.jpg")
+        jpeg(self.inputs / "B/two.jpg")
+        before = discover(self.inputs)
+        with self.assertRaisesRegex(ValueError, "exclude saved scans"):
+            discover(self.inputs, before, collectors=["A"])
+        for scope in ([], ["A/set1"], ["../A"], "A"):
+            with self.subTest(scope=scope), self.assertRaises(ValueError):
+                discover(self.inputs, collectors=scope)
+        scoped = discover(self.inputs, before, collectors=["A", "B"])
+        self.assertEqual(scoped["images"], before["images"])
+        self.assertEqual(scoped["notes"], before["notes"])
+
     def test_prepared_prompt_uses_exact_scan_set_for_the_whole_card(self):
         folders = ["Carriker/set1", "Carriker/set2", "Carriker/set3", "Carriker/set20", "Other/set2"]
         log = self.root / "card-backs.txt"
@@ -191,13 +204,36 @@ class DiscoveryTests(Workspace):
         self.assertNotEqual(*[i['image_id'] for i in inv['images']])
         self.assertTrue(all(len(i['warnings']) == 2 for i in inv['images']))
 
-    def test_corrupt_unsupported_and_missing_visible(self):
+    def test_corrupt_and_missing_jpegs_visible_nonimages_ignored(self):
         jpeg(self.inputs/'good.jpg'); (self.inputs/'bad.jpg').write_bytes(b'not jpeg')
         (self.inputs/'readme.txt').write_text('independent staff notes')
         old = discover(self.inputs); (self.inputs/'good.jpg').unlink()
         inv = discover(self.inputs, old)
-        self.assertEqual({i['status'] for i in inv['images']}, {'unreadable', 'unsupported', 'missing'})
-        self.assertEqual(len(inv['notes']), 3)
+        self.assertEqual({i['status'] for i in inv['images']}, {'unreadable', 'missing'})
+        self.assertEqual({i['path'] for i in inv['images']}, {'good.jpg', 'bad.jpg'})
+        self.assertEqual(len(inv['notes']), 2)
+
+    def test_non_jpegs_are_not_opened_or_added_to_duplex_pairs(self):
+        folder = self.inputs / "C/set3"
+        for name in ("IMG_2020_01_02_11_00_10S.JPG", "IMG_2020_01_02_11_00_20S.jPeG"):
+            jpeg(folder / name)
+        ignored = [self.inputs / "reference.lnk", folder / "IMG_2020_01_02_11_00_15S.jpg.lnk",
+                   folder / "notes.txt", folder / "preview.png", folder / "index.json"]
+        for path in ignored:
+            path.write_bytes(b"Synthetic reference file, not a scan")
+        log = self.root / "card-backs.txt"
+        log.write_text("C/set3 | all-pairs", encoding="utf-8")
+        read = Path.read_bytes
+        def scan_bytes(path):
+            self.assertNotIn(path, ignored)
+            return read(path)
+        with patch.object(Path, "read_bytes", scan_bytes):
+            inventory = discover(self.inputs, card_back_log=log, complete_sets=["C/set3"])
+        self.assertEqual(len(inventory["images"]), 2)
+        self.assertEqual(len(inventory["notes"]), 1)
+        self.assertEqual(len(inventory["notes"][0]["image_ids"]), 2)
+        self.assertEqual(inventory["notes"][0]["discovery"], "ready")
+        self.assertTrue(all(path.read_bytes() == b"Synthetic reference file, not a scan" for path in ignored))
 
     def test_explicit_group_order_retained_no_auto_new_pages(self):
         self.setup_note()

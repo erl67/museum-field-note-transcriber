@@ -149,7 +149,7 @@ def regroup(inventory, overrides, card_backs=None):
     return updated
 
 
-def discover(root, previous=None, overrides=None, generated_paths=(), *, card_back_log=None, complete_sets=()):
+def discover(root, previous=None, overrides=None, generated_paths=(), *, card_back_log=None, complete_sets=(), collectors=None):
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError(f"Input root is unavailable: {root}; saved records remain usable offline")
@@ -158,10 +158,20 @@ def discover(root, previous=None, overrides=None, generated_paths=(), *, card_ba
         raise ValueError("Store belongs to another input root; do not replace its history")
     collection = previous.get("collection_id", str(uuid.uuid5(uuid.NAMESPACE_URL, str(root))))
     old = {i["path"]: i for i in previous.get("images", [])}
+    scope = collectors if collectors is not None else previous.get("collector_scope")
+    if scope is not None:
+        if not isinstance(scope, (list, tuple)) or not scope or any(
+                not isinstance(name, str) or len(relative_path(name).parts) != 1 for name in scope):
+            raise ValueError("Collector scope must name one or more top-level collector folders")
+        scope = sorted(set(scope))
+        if any(len(relative_path(path).parts) < 2 or relative_path(path).parts[0] not in scope for path in old):
+            raise ValueError("Collector scope would exclude saved scans; resolve that inventory before narrowing its scope")
     complete_sets = set(complete_sets)
     for name in complete_sets:
         if len(relative_path(name).parts) < 2 or not inside(root, name).is_dir():
             raise ValueError(f"Expected an existing collector/set folder for --complete-set: {name}")
+        if scope is not None and relative_path(name).parts[0] not in scope:
+            raise ValueError(f"Completed set is outside the saved collector scope: {name}")
     # Saved members stay addressable. Only an explicit completion admits new members.
     scan_folders = complete_sets | {i["folder"] for i in old.values() if "/" in i["folder"]}
     branches = {parent.as_posix() for name in scan_folders for parent in (Path(name), *Path(name).parents)}
@@ -172,6 +182,9 @@ def discover(root, previous=None, overrides=None, generated_paths=(), *, card_ba
         issues.append(dict(path=str(error.filename), status="unavailable_directory", error=str(error)))
     for folder, dirs, files in root.walk(on_error=walk_error, follow_symlinks=False):
         relative = folder.relative_to(root)
+        if not relative.parts and scope is not None:
+            dirs[:] = [name for name in dirs if name in scope]
+            files = []
         if relative.parts:
             dirs[:] = [name for name in dirs if (relative / name).as_posix() in branches]
         for name in list(dirs):
@@ -181,6 +194,8 @@ def discover(root, previous=None, overrides=None, generated_paths=(), *, card_ba
         for name in sorted(files):
             path = folder / name
             rel = (relative / name).as_posix()
+            if path.suffix.lower() not in {".jpg", ".jpeg"}:
+                continue
             if len(relative.parts) >= 2 and relative.as_posix() not in complete_sets and rel not in old:
                 continue
             if rel not in generated:
@@ -217,6 +232,8 @@ def discover(root, previous=None, overrides=None, generated_paths=(), *, card_ba
                 row["warnings"].append("Case-insensitive duplicate path")
     inventory = dict(schema_version=1, collection_id=collection, input_root=str(root),
                      images=images, notes=deepcopy(previous.get("notes", [])), issues=issues)
+    if scope is not None:
+        inventory["collector_scope"] = scope
     if "overrides" in previous:
         inventory["overrides"] = previous["overrides"]
     if overrides is None:

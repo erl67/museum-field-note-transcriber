@@ -18,8 +18,11 @@ function usesIndex_() {
   return Boolean(SETTINGS.INDEX_FOLDER_ID || SETTINGS.INDEX_PARENT_FOLDER_ID);
 }
 function sha_(value) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value)
-    .map(byte => ('0' + (byte & 255).toString(16)).slice(-2)).join('');
+  const algorithm = Utilities.DigestAlgorithm.SHA_256;
+  const digest = typeof value === 'string'
+    ? Utilities.computeDigest(algorithm, value, Utilities.Charset.UTF_8)
+    : Utilities.computeDigest(algorithm, value);
+  return Array.from(digest, byte => (byte & 255).toString(16).padStart(2, '0')).join('');
 }
 function validId_(value, prefix) {
   return typeof value === 'string' && new RegExp('^' + prefix + '_[0-9a-f]{32}$').test(value);
@@ -345,9 +348,7 @@ function verifiedImage_(note, imageId) {
     }
     const bytes = file.getBlob().getBytes();
     if (bytes.length !== scan.size) return { status: 'changed_scan', message: 'Drive scan size differs from the export; review the scan path or mapping.' };
-    const sha = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)
-      .map(byte => ('0' + (byte & 255).toString(16)).slice(-2)).join('');
-    if (sha !== scan.sha256) return { status: 'changed_scan', message: 'Drive scan hash differs from the export; review the scan path or mapping.' };
+    if (sha_(bytes) !== scan.sha256) return { status: 'changed_scan', message: 'Drive scan hash differs from the export; review the scan path or mapping.' };
     return { status: 'ready', data: 'data:image/jpeg;base64,' + Utilities.base64Encode(bytes),
       url: SETTINGS.PUBLIC_MODE ? '' : 'https://drive.google.com/file/d/' + encodeURIComponent(file.getId()) + '/view' };
   } catch (error) {

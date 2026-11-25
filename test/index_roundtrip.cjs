@@ -38,8 +38,15 @@ assert.equal(loaded.context.set, 'A/set1');
 assert.equal(loaded.context.page, 2);
 assert.equal(loaded.note.scans[1].image_id, loaded.note.pages[1].image_id);
 browser.sandbox.renderNote(loaded);
-assert.equal(nodes(browser.ids.record).filter(n => n.className === 'page-pair').length, 1);
-assert.equal(nodes(browser.ids.record).some(n => n.textContent.includes('A second observation')), true);
+const pairs = nodes(browser.ids.record).filter(n => n.className === 'page-pair');
+assert.deepEqual(pairs.map(pair => pair.dataset.imageId), Array.from(loaded.note.scans, scan => scan.image_id));
+assert.equal(pairs.length, 2);
+for (const [i, pair] of pairs.entries())
+  assert.equal(nodes(pair).find(n => n.tag === 'pre').textContent, loaded.note.pages[i].text);
+assert.equal(pairs[0].scrolledIntoView, undefined);
+assert.equal(pairs[1].scrolledIntoView, true);
+assert.ok(nodes(pairs[1]).find(n => n.tag === 'a' && n.href.includes('page=2')));
+assert.ok(!nodes(browser.ids.record).some(n => n.attributes['aria-label'] === 'Scan navigation'));
 assert.equal(counts().imageReads, 0);
 const request = { note_id: id, image_id: loaded.note.scans[1].image_id, token: loaded.token };
 assert.equal(api.loadImage(request).status, 'missing_mapping');

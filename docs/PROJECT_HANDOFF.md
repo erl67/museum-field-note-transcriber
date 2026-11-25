@@ -1,4 +1,16 @@
-# Project handoff · November 23, 2026
+# Project handoff · November 24, 2026
+
+## November 24 third-set preparation and partial publication check
+
+Set 3 is now deferred after the operator identified a missing back in the middle of the pile. Its `all-pairs` line is commented in the private scanner log with the affected front filename. The operator's preparation had saved 203 set 3 scans, 16 scans in a top-level `set4` folder and one reference shortcut. None of those new records had transcription or review history. The set 1 and 2 image identities, hashes and grouping matched the preceding inventory exactly, so that preceding snapshot was appended as the current inventory to meet the requested sets-1-and-2 viewer scope. Earlier inventory events and all results remain intact. A pre-change journal backup is under ignored `local/backups/`. Local reports and the indexed reader were rebuilt for 462 cards / 576 scans: 456 complete readings and six failed readings. No source file or Drive publication was changed.
+
+New discovery now ignores non-JPEG files without opening them; `.jpg` and `.jpeg` remain case-insensitive, and damaged JPEGs still report errors. Do not re-inventory the deferred piles for this viewer test. After the missing back is inserted into its correct chronological position, re-enable the set 3 pairing rule and preview the whole pile before admission. Put the inventory command inside a PowerShell `if ($LASTEXITCODE -eq 0)` success branch; a standalone `throw` pasted interactively does not reliably prevent later pasted commands from running. The top-level `set4` folder should be placed under its intended collector before its own explicit completed-set intake.
+
+The operator confirmed that top-level set 4 is still being scanned and must not be discovered. Inventory/dry-run now accept repeatable `--collector` folder names and inventory persists `collector_scope`. The current store is scoped to `Carriker`, so subsequent preparation skips all top-level files and sibling staging folders even without repeating the option. Narrowing a scope cannot silently discard existing saved scans. Additional collector folders require explicit scope expansion; unfinished nested sets still require their own completion admission.
+
+Prompt 1.3 already supplies the paired-reverse cancellation guidance for Carriker sets 2 and 3, including retaining readable crossed-out passages. No prompt or export implementation change was needed for the original set 3 request.
+
+A synthetic test adds a duplex third set with complete, 503-failed and unprocessed cards, exports and publishes the per-set text and indexed viewer, completes the failed card, then republishes. All cards and ordered sides remain present, cancelled reverse text is retained, and the unprocessed card is not lost during the update. Test publication destinations are temporary local fixtures. Partial-transcription sets are supported by both existing publication formats.
 
 ## November 23 indexed Apps Script reader
 

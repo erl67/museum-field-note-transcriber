@@ -6,10 +6,14 @@ import unittest
 from unittest.mock import patch
 
 from fieldnotes.cli import main
-from fieldnotes.publication import generated_paths, publish_files
+from fieldnotes.discovery import discover
+from fieldnotes.execution import Quota, transcribe
+from fieldnotes.exports import export_all
+from fieldnotes.images import prepare_request
+from fieldnotes.publication import generated_paths, publish, publish_files
 from fieldnotes.storage import encoded, digest
 from fieldnotes.viewer_index import DIRECTORY, build_index, search_keys, viewer_files
-from test.helpers import ROOT, Workspace, rich_document
+from test.helpers import ROOT, Workspace, Clock, FakeTransport, ServiceError, jpeg, rich_document
 
 
 class ViewerIndexTests(Workspace):
@@ -60,6 +64,59 @@ class ViewerIndexTests(Workspace):
         self.assertEqual(json.loads(empty["index.json"])["count"], 0)
         with self.assertRaises(ValueError):
             viewer_files(self.store, self.inventory, selected=["unknown"])
+
+    def test_partial_set_exports_and_both_publications_update_without_losing_pending_cards(self):
+        fixture = json.loads((ROOT / "test/inputs/partial-set.json").read_text("utf-8"))
+        folder = fixture["folder"]
+        for name in fixture["filenames"]:
+            jpeg(self.inputs / folder / name)
+        log = self.store.root / "card-backs.txt"
+        log.write_text(f"{folder} | all-pairs\n", encoding="utf-8")
+        self.inventory = discover(self.inputs, self.inventory, complete_sets=[folder], card_back_log=log)
+        self.store.append("inventory", self.inventory)
+        cards = [n for n in self.inventory["notes"] if n["active"] and n["hints"]["collector_folder"] == "Example"]
+        self.assertEqual([len(n["image_ids"]) for n in cards], [2, 2, 2])
+
+        self.note = cards[0]
+        self.request = prepare_request(self.inventory, self.note, self.config)
+        doc = rich_document(self.note["image_ids"])
+        doc["pages"][1]["text"] = fixture["reverse_text"]
+        self.save(doc)
+        self.note = cards[1]
+        self.request = prepare_request(self.inventory, self.note, self.config)
+        clock = Clock()
+        transcribe(self.store, self.note, self.request, self.config,
+                   lambda: FakeTransport([ServiceError(503)] * self.config.attempts),
+                   quota=Quota(self.config, clock.time, clock.sleep), sleep=clock.sleep)
+
+        output, destination = self.root / "exports", self.root / "published"
+        destination.mkdir()
+        for resumed in (False, True):
+            if resumed:
+                self.save(rich_document(self.note["image_ids"]))
+            export_all(self.store, self.inventory, output)
+            publish(self.store, self.inventory, output, destination)
+            text = (destination / (folder + ".txt")).read_text("utf-8")
+            self.assertIn(fixture["reverse_text"], text)
+            for card in cards:
+                self.assertEqual(text.count("Stable note ID: " + card["note_id"]), 1)
+            self.assertIn("No complete transcription is available.", text)
+            self.assertIn("Execution: unprocessed", text)
+            self.assertEqual("Execution: failed" in text, not resumed)
+
+            self.assertEqual(main(["--store", str(self.store.root), "publish", "--viewer-only", "--verify-scans",
+                                   "--output", str(output), "--destination", str(destination)]), 0)
+            objects = [json.loads(path.read_bytes()) for path in (destination / DIRECTORY).glob("*.json")]
+            notes = {v["note_id"]: v for v in objects if isinstance(v, dict) and "note_id" in v and "scans" in v}
+            manifest = json.loads((destination / DIRECTORY / "index.json").read_bytes())
+            self.assertEqual(manifest["count"], 4)  # Prior set plus all three new cards.
+            self.assertEqual([notes[c["note_id"]]["execution"] for c in cards],
+                             ["complete", "complete" if resumed else "failed", "unprocessed"])
+            self.assertEqual(notes[cards[0]["note_id"]]["pages"][1]["text"], fixture["reverse_text"])
+            for card in cards:
+                self.assertEqual([s["side"] for s in notes[card["note_id"]]["scans"]], ["Front", "Back"])
+                self.assertEqual([s["image_id"] for s in notes[card["note_id"]]["scans"]], card["image_ids"])
+            self.assertEqual(notes[cards[2]["note_id"]]["pages"], [])
 
     def test_explicit_empty_or_invalid_selection_never_defaults_to_all_cards(self):
         output = self.root / "selected"

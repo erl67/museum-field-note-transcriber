@@ -66,13 +66,18 @@ function context(bundle = fixture(), options = {}) {
       if (key === 'index' && options.indexFile) return { isTrashed: () => false, getName: () => 'Field_notes_index', getFilesByName(name) {
         indexReads.push(name);
         const raw = options.indexFile(name);
-        return iterator(raw == null ? [] : [{ isTrashed: () => false, getSize: () => Buffer.byteLength(raw),
-          getBlob: () => ({ getDataAsString: () => raw }) }]);
+        if (raw == null) return iterator([]);
+        const data = Buffer.from(raw);
+        return iterator([{ isTrashed: () => false, getSize: () => data.length,
+          getBlob: () => ({ getBytes: () => Array.from(new Int8Array(data)), getDataAsString: () => data.toString('utf8') }) }]);
       }};
       if (options.folderError || key !== options.scanRoot) throw Error('hidden folder');
       return folder(tree);
     } },
-    Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, computeDigest: (_, v) => [...crypto.createHash('sha256').update(Buffer.from(v)).digest()], base64Encode: v => Buffer.from(v).toString('base64') }, console
+    Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+      computeDigest: (algorithm, value, charset) => Array.from(new Int8Array(
+        crypto.createHash(algorithm).update(Buffer.from(value, charset)).digest())),
+      base64Encode: v => Buffer.from(v).toString('base64') }, console
   };
   vm.createContext(sandbox);
   let code = server.replace(/\bACCESS_FILE_ID:\s*'[^']*'/, "ACCESS_FILE_ID: " + JSON.stringify(options.indexParent ? '' : 'gate'))
@@ -93,6 +98,7 @@ class Element {
   setAttribute(n, v) { this.attributes[n] = v; }
   showModal() { this.open = true; }
   focus() { this.focused = true; }
+  scrollIntoView() { this.scrolledIntoView = true; }
   select() { this.selected = true; }
   close() { this.open = false; }
   remove() { this.removed = true; }

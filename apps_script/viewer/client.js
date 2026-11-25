@@ -71,17 +71,16 @@ function collectorOptions(names) {
   for (const name of names) element('option', name, select).value = name;
   select.value = state.collector;
 }
-function pageLinks(parent, current, total, param, note) {
+function pageLinks(parent, current, total) {
   if (total <= 1) return;
   const nav = element('nav', null, parent, 'letter-nav');
-  const noun = param === 'page' ? 'Scan' : 'Page';
-  nav.setAttribute('aria-label', noun + ' navigation');
+  nav.setAttribute('aria-label', 'Page navigation');
   const steps = element('div', null, nav, 'nav-steps');
   for (const [number, label] of [[current - 1, 'Previous'], [current + 1, 'Next']]) {
     if (number < 1 || number > total) continue;
-    element('a', label + ' ' + noun.toLowerCase(), steps, 'button').href = indexedUrl({ note, [param]: number });
+    element('a', label + ' page', steps, 'button').href = indexedUrl({ p: number });
   }
-  element('span', noun + ' ' + current + ' of ' + total, nav, 'nav-position');
+  element('span', 'Page ' + current + ' of ' + total, nav, 'nav-position');
 }
 function renderIndex(result) {
   const root = document.getElementById('results'); root.replaceChildren();
@@ -122,7 +121,7 @@ function renderIndex(result) {
     linkTo(row.note_id, 'Read note →', cell).setAttribute('aria-label', 'Read note: ' + row.number_label + ', ' + row.note_id);
     element('span', countLabel(row.pages, 'page') + ' · ' + row.execution, cell, 'field-note');
   }
-  pageLinks(root, result.p, Math.ceil(result.total / result.pageSize), 'p');
+  pageLinks(root, result.p, Math.ceil(result.total / result.pageSize));
 }
 function renderFolders(result) {
   if (indexed) return renderIndex(result);
@@ -226,7 +225,11 @@ function renderSourceText(parent, text, tokens) {
     function renderPage(root, scan, page, note, number, jobs, hits) {
       const pair = element('section', null, root, 'page-pair');
       pair.dataset.imageId = scan ? scan.image_id : page.image_id;
-      element('h3', 'Page ' + number + (scan && scan.side ? ' · ' + scan.side : ''), pair);
+      const title = 'Page ' + number + (scan && scan.side ? ' · ' + scan.side : '');
+      const heading = element('h3', null, pair);
+      if (indexed && scan && note.scans.length > 1) {
+        element('a', title, heading).href = indexedUrl({ note: note.note_id, page: number });
+      } else heading.textContent = title;
       const columns = element('div', null, pair, 'page-columns');
       const figure = element('figure', null, columns, 'page-column');
       element('p', 'Original scan', figure, 'column-label');
@@ -263,6 +266,7 @@ function renderSourceText(parent, text, tokens) {
         element('h4', 'Optional translation · ' + translation.language, transcript);
         element('pre', translation.text, transcript);
       }
+      return pair;
     }
     function loadScans(jobs, result) {
       // Sequential downloads preserve positions and bound simultaneous image memory.
@@ -343,9 +347,10 @@ function renderNote(result) {
     element('p', 'Interpretive summary', summary, 'eyebrow'); element('p', note.summary, summary);
   }
   const jobs = [], pages = new Map(note.pages.map(p => [p.image_id, p]));
-  if (indexed) pageLinks(root, state.page, note.scans.length, 'page', note.note_id);
+  let bookmarkedPage;
   note.scans.forEach((scan, index) => {
-    if (!indexed || index + 1 === state.page) renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs, hits);
+    const pair = renderPage(root, scan, pages.get(scan.image_id), note, index + 1, jobs, hits);
+    if (indexed && index > 0 && index + 1 === Number(state.page)) bookmarkedPage = pair;
   });
   const scans = new Set(note.scans.map(s => s.image_id)); let number = note.scans.length;
   for (const page of note.pages) if (!scans.has(page.image_id)) renderPage(root, null, page, note, ++number, jobs, hits);
@@ -358,7 +363,9 @@ function renderNote(result) {
     localities: note.localities, dates: note.dates, observations: note.observations };
   if (!indexed && !result.publicMode) Object.assign(evidence, { review_reasons: note.review_reasons, provenance: note.provenance, partial_response: note.partial_response });
   element('pre', JSON.stringify(evidence, null, 2), details);
-  renderNavigation(root, result.navigation, 'bottom'); loadScans(jobs, result);
+  renderNavigation(root, result.navigation, 'bottom');
+  if (bookmarkedPage) bookmarkedPage.scrollIntoView();
+  loadScans(jobs, result);
 }
 function openNote(id) {
   document.getElementById('message').textContent = 'Loading note…';

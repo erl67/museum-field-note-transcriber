@@ -24,8 +24,13 @@ function indexReader_(imageRequest) {
       try { raw = cache.get(ref); } catch (error) { /* Cache is optional. */ }
     }
     if (!raw) {
-      raw = file.getBlob().getDataAsString('UTF-8');
-      if (ref && sha_(raw) !== ref) throw new Error('Index content changed. Check Drive sync and retry.');
+      const blob = file.getBlob();
+      if (ref) {
+        const actual = sha_(blob.getBytes());
+        if (actual !== ref)
+          throw new Error('Index content changed for ' + name + '. Drive returned SHA-256 ' + actual + '. Check Drive sync and retry.');
+      }
+      raw = blob.getDataAsString('UTF-8');
       if (cache) {
         try { cache.put(ref, raw, 300); } catch (error) { /* Continue without caching. */ }
       }

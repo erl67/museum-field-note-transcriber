@@ -10,6 +10,25 @@ function many() {
   b.notes.push({ ...structuredClone(n), note_id:id('note',2),number_order:1,catalogue:{...n.catalogue,collector:'Avery',collector_folder:'Avery'} });
   return seal(b);
 }
+test('opening a set verifies the stored UTF-8 bytes before decoding its rows', () => {
+  const species = 'Café ♂ �';
+  const page = JSON.stringify([{ species }]);
+  const pageName = sha(page) + '.json';
+  const directory = JSON.stringify([sha(page)]);
+  const set = { name: 'Example/set1', count: 1, pages: sha(directory) };
+  const manifest = { schema_version: 2, export_kind: 'fieldnotes-index', page_size: 40,
+    collectors: [{ name: 'Example', sets: [set] }] };
+  const files = { 'index.json': JSON.stringify(manifest), [set.pages + '.json']: directory, [pageName]: page };
+  const openSet = () => context(fixture(), { indexFile: name => files[name] }).sandbox.listFolders({ set: set.name });
+  assert.equal(openSet().rows[0].species, species);
+
+  // An invalid byte and the valid replacement character decode to the same text.
+  // Only the published bytes may satisfy the file's hash.
+  const [before, after] = page.split('�');
+  files[pageName] = Buffer.concat([Buffer.from(before), Buffer.from([0xff]), Buffer.from(after)]);
+  assert.equal(files[pageName].toString('utf8'), page);
+  assert.throws(openSet, error => error.message.includes('content changed') && error.message.includes(pageName));
+});
 test('numeric searches include range members and highlight the original text on its evidence page', () => {
   const cases = JSON.parse(fs.readFileSync(path.join(__dirname, '../../test/inputs/catalogue-ranges.json'), 'utf8'));
   const api = context().sandbox;
@@ -197,8 +216,21 @@ test('source HTML is literal text and never executable markup',()=>{
   assert.doesNotMatch(html,/innerHTML|document\.write|<\?!/);
 });
 test('sequential image errors leave text visible and continue all pages',()=>{
-  const f=frontend();f.sandbox.renderNote(context().sandbox.loadNote(id('note',1),{}));assert.equal(f.calls[0].req.image_id,id('img',2));
-  f.calls[0].failure({message:'Synthetic inaccessible image'});assert.equal(f.calls[1].req.image_id,id('img',1));assert.match(text(f.ids.record),/0012/);assert.match(text(f.ids.record),/inaccessible/);
+  const f = frontend({ indexed: 'yes' });
+  const result = context().sandbox.loadNote(id('note',1),{});
+  result.collectors = ['Carriker'];
+  f.sandbox.renderNote(result);
+  const pairs = f.ids.record.children.filter(n => n.className === 'page-pair');
+  assert.equal(pairs.length, 2);
+  assert.match(text(pairs[0]), /0012/);
+  assert.match(text(pairs[1]), /\[blank\]/);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].req.image_id, pairs[0].dataset.imageId);
+  f.calls[0].failure({ message: 'Synthetic inaccessible image' });
+  assert.equal(f.calls[1].req.image_id, pairs[1].dataset.imageId);
+  f.calls[1].success({ status: 'ready', data: 'data:image/jpeg;base64,AA', url: '' });
+  assert.match(text(pairs[0]), /inaccessible/);
+  assert.ok(nodes(pairs[1]).some(n => n.textContent === 'Enlarge scan'));
 });
 test('loaded image dimensions preserve proportions and offer enlargement',()=>{
   const f=frontend();f.sandbox.renderNote(context().sandbox.loadNote(id('note',1),{}));f.calls[0].success({status:'ready',data:'data:image/jpeg;base64,AA',url:''});

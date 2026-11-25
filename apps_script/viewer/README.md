@@ -1,6 +1,6 @@
 # Field Notes Viewer for Google Apps Script
 
-The opening page lists collectors and their scan sets. Selecting a set shows up to 40 whole cards at a time in scan order. Search accepts a collection number, a member of a written range or a stable `note_…` ID. The collector selector scopes the search. The reader places the selected scan beside its transcription, stacks them on narrow screens and offers full-size enlargement. Previous/next scan stays on the card. Previous/next note follows the set or search results.
+The opening page lists collectors and their scan sets. Selecting a set shows up to 40 whole cards at a time in scan order. Search accepts a collection number, a member of a written range or a stable `note_…` ID. The collector selector scopes the search. A card opens with all its pages in order, front above back. Each scan appears beside its transcription on desktop and above it on a phone. Each image can be enlarged. Page headings on multi-page cards link to that page within the whole card. Previous/next note follows the set or search results.
 
 ## Try it offline
 
@@ -60,7 +60,7 @@ For an installation directly from the tracked sources:
 3. Save. Use **Deploy → Test deployments → Web app** for an editor test. Authorize read-only Drive access in the intended account. Open the test URL. For the private installed version, use **Deploy → New deployment → Web app**, execute as the **user accessing the web app** and choose **only myself**. The checked-in manifest uses this private configuration.
 4. Copy the assigned `/exec` URL. After changing code, use **Deploy → Manage deployments → Edit**, select a new version and update the same deployment to preserve bookmarks. Data-only updates use the publisher and keep the same web app URL.
 
-The indexed reader rechecks its gate at every page and data request. It opens files by exact names or verified image mappings. A scan over 12 MiB receives an explicit display-limit message. A new page selection downloads one JPEG. Browser requests cannot name a Drive file or filesystem path directly.
+The indexed reader rechecks its gate at every page and data request. It opens files by exact names or verified image mappings. Opening a card shows all its transcriptions and requests its JPEGs one at a time in scan order. Each image is verified independently. A scan over 12 MiB receives an explicit display-limit message. Browser requests cannot name a Drive file or filesystem path directly.
 
 ### Verify a deployment
 
