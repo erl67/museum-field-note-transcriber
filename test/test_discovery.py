@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fieldnotes.discovery import discover, regroup, reconcile_paths
 from fieldnotes.images import prepare_request
 from fieldnotes.paths import inside
+from fieldnotes.prompt import CARRIKER_NUMBER_GUIDANCE
 from fieldnotes.storage import digest
 from .helpers import Workspace, jpeg
 
@@ -23,7 +24,8 @@ class DiscoveryTests(Workspace):
         self.assertEqual(scoped["notes"], before["notes"])
 
     def test_prepared_prompt_uses_exact_scan_set_for_the_whole_card(self):
-        folders = ["Carriker/set1", "Carriker/set2", "Carriker/set3", "Carriker/set20", "Other/set2"]
+        folders = ["Carriker/set1", "Carriker/set2", "Carriker/set3", "Carriker/set20",
+                   "Other/set2", "Carriker-copy/set2"]
         log = self.root / "card-backs.txt"
         log.write_text("\n".join(f"{folder} | front.jpg | back.jpg" for folder in folders), encoding="utf-8")
         for folder in folders:
@@ -35,6 +37,8 @@ class DiscoveryTests(Workspace):
             folder = provenance["images"][0]["path"].rsplit("/", 1)[0]
             with self.subTest(folder=folder):
                 prompt = provenance["prompt"]
+                self.assertIn("North Marsh (0274) ♀♂♂", prompt)
+                self.assertEqual(CARRIKER_NUMBER_GUIDANCE in prompt, folder.split("/")[0] == "Carriker")
                 self.assertEqual([page["side"] for page in provenance["images"]], ["Front", "Back"])
                 self.assertEqual("mixes single-sided" in prompt, folder == "Carriker/set1")
                 self.assertEqual("broad wavy strokes" in prompt, folder in {"Carriker/set2", "Carriker/set3"})
@@ -45,6 +49,7 @@ class DiscoveryTests(Workspace):
         note = next(n for n in mixed["notes"] if n["active"] and n["override"])
         prompt = prepare_request(mixed, note, self.config)["provenance"]["prompt"]
         self.assertNotIn("Reading guidance for", prompt)
+        self.assertNotIn(CARRIKER_NUMBER_GUIDANCE, prompt)
 
     def test_staging_deletions_and_rescans_are_invisible_until_set_completion(self):
         log = self.root / "card-backs.txt"
